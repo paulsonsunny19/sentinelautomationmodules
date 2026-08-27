@@ -10,6 +10,8 @@ param sentinelSubscriptionId string = subscription().subscriptionId
 param sentinelResourceGroup string
 @description('Log Analytics workspace used by Microsoft Sentinel.')
 param sentinelWorkspaceName string
+@description('Direct HTTPS URL for the pinned STAT Next application ZIP. Must not redirect.')
+param packageUri string
 
 var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
@@ -64,6 +66,8 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
       appSettings: [
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'python' }
+        { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
+        { name: 'ENABLE_ORYX_BUILD', value: 'true' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
         { name: 'AzureWebJobsStorage__accountName', value: storage.name }
         { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
@@ -96,6 +100,15 @@ module workspaceRbac 'workspace-rbac.bicep' = {
 
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'ftp', properties: { allow: false } }
 resource scmPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'scm', properties: { allow: false } }
+
+module application 'app-deploy.bicep' = {
+  name: 'statNextApplication'
+  dependsOn: [hostStorageRole, workspaceRbac, ftpPolicy, scmPolicy]
+  params: {
+    functionName: functionApp.name
+    packageUri: packageUri
+  }
+}
 
 output functionName string = functionApp.name
 output functionPrincipalId string = functionApp.identity.principalId
