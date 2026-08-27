@@ -10,14 +10,20 @@ param sentinelSubscriptionId string = subscription().subscriptionId
 param sentinelResourceGroup string
 @description('Log Analytics workspace used by Microsoft Sentinel.')
 param sentinelWorkspaceName string
-@description('Direct HTTPS URL for the pinned STAT Next application ZIP. Must not redirect.')
+@description('Public source URL used only to stage the validated package into private Azure Blob Storage.')
 param packageUri string
 
 var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
 var functionName = '${namePrefix}-api'
 var insightsName = '${namePrefix}-appi'
+var packageContainerName = 'statnext-package'
+var packageBlobName = 'stat-next.zip'
+var privatePackageUri = '${storage.properties.primaryEndpoints.blob}${packageContainerName}/${packageBlobName}'
+var stagingIdentityName = '${take(namePrefix, 40)}-stage'
 var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+var storageBlobDataReaderRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
+var storageBlobDataContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageName
@@ -32,6 +38,68 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     defaultToOAuthAuthentication: true
     publicNetworkAccess: 'Enabled'
   }
+}
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: storage
+  name: 'default'
+}
+
+resource packageContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: packageContainerName
+  properties: { publicAccess: 'None' }
+}
+
+resource stagingIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: stagingIdentityName
+  location: location
+}
+
+resource stagingWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, stagingIdentity.id, 'package-stage-writer')
+  scope: storage
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: stagingIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource stagePackage 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'StageSTATNextPackage'
+  location: location
+  kind: 'AzureCLI'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${stagingIdentity.id}': {} }
+  }
+  properties: {
+    azCliVersion: '2.67.0'
+    timeout: 'PT15M'
+    cleanupPreference: 'OnSuccess'
+    retentionInterval: 'P1D'
+    forceUpdateTag: packageUri
+    environmentVariables: [
+      { name: 'SOURCE_URI', value: packageUri }
+      { name: 'STORAGE_ACCOUNT', value: storage.name }
+      { name: 'CONTAINER', value: packageContainerName }
+      { name: 'BLOB_NAME', value: packageBlobName }
+    ]
+    scriptContent: '''
+      set -euo pipefail
+      az storage blob copy start --account-name "$STORAGE_ACCOUNT" --destination-container "$CONTAINER" --destination-blob "$BLOB_NAME" --source-uri "$SOURCE_URI" --auth-mode login --only-show-errors
+      for i in $(seq 1 60); do
+        status=$(az storage blob show --account-name "$STORAGE_ACCOUNT" --container-name "$CONTAINER" --name "$BLOB_NAME" --auth-mode login --query properties.copy.status -o tsv 2>/dev/null || true)
+        if [ "$status" = "success" ]; then exit 0; fi
+        if [ "$status" = "failed" ] || [ "$status" = "aborted" ]; then echo "Package staging failed: $status" >&2; exit 1; fi
+        sleep 5
+      done
+      echo "Timed out waiting for package staging" >&2
+      exit 1
+    '''
+  }
+  dependsOn: [packageContainer, stagingWriter]
 }
 
 resource insights 'Microsoft.Insights/components@2020-02-02' = {
@@ -63,20 +131,9 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       http20Enabled: true
-      appSettings: [
-        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
-        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'python' }
-        { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
-        { name: 'ENABLE_ORYX_BUILD', value: 'true' }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
-        { name: 'AzureWebJobsStorage__accountName', value: storage.name }
-        { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
-        { name: 'AzureWebJobsStorage__blobServiceUri', value: storage.properties.primaryEndpoints.blob }
-        { name: 'AzureWebJobsStorage__queueServiceUri', value: storage.properties.primaryEndpoints.queue }
-        { name: 'AzureWebJobsStorage__tableServiceUri', value: storage.properties.primaryEndpoints.table }
-      ]
     }
   }
+  dependsOn: [stagePackage]
 }
 
 resource hostStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -84,6 +141,16 @@ resource hostStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   scope: storage
   properties: {
     roleDefinitionId: storageBlobDataOwnerRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource packageReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, functionApp.id, 'package-reader')
+  scope: storage
+  properties: {
+    roleDefinitionId: storageBlobDataReaderRole
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
@@ -98,18 +165,28 @@ module workspaceRbac 'workspace-rbac.bicep' = {
   }
 }
 
+resource appSettings 'Microsoft.Web/sites/config@2022-09-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: {
+    FUNCTIONS_EXTENSION_VERSION: '~4'
+    FUNCTIONS_WORKER_RUNTIME: 'python'
+    APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString
+    AzureWebJobsStorage__accountName: storage.name
+    AzureWebJobsStorage__credential: 'managedidentity'
+    AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob
+    AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue
+    AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table
+    WEBSITE_RUN_FROM_PACKAGE: privatePackageUri
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned'
+  }
+  dependsOn: [hostStorageRole, packageReaderRole, workspaceRbac]
+}
+
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'ftp', properties: { allow: false } }
 resource scmPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'scm', properties: { allow: false } }
-
-module application 'app-deploy.bicep' = {
-  name: 'statNextApplication'
-  dependsOn: [hostStorageRole, workspaceRbac, ftpPolicy, scmPolicy]
-  params: {
-    functionName: functionApp.name
-    packageUri: packageUri
-  }
-}
 
 output functionName string = functionApp.name
 output functionPrincipalId string = functionApp.identity.principalId
 output storageAccountName string = storage.name
+output packageBlobUri string = privatePackageUri
