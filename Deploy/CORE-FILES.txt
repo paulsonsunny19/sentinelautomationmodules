@@ -1,0 +1,6 @@
+azuredeploy.json
+createUiDefinition.json
+Deploy/statdeploy.json
+Function/SystemIdentity.json
+DEPLOY-STAT.md
+Deploy/DEPLOY-URL.txt
