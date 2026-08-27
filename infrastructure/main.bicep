@@ -17,7 +17,6 @@ var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
 var functionName = '${namePrefix}-api'
 var insightsName = '${namePrefix}-appi'
-var playbookName = '${namePrefix}-incident-triage'
 var workbookName = guid(resourceGroup().id, namePrefix, 'status-workbook')
 var packageContainerName = 'statnext-package'
 var packageBlobName = 'stat-next.zip'
@@ -71,8 +70,11 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = { name: functionName, lo
 resource hostStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, functionApp.id, 'host-storage'), scope: storage, properties: { roleDefinitionId: storageBlobDataOwnerRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' } }
 resource packageReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, functionApp.id, 'package-reader'), scope: storage, properties: { roleDefinitionId: storageBlobDataReaderRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' } }
 
-module playbook 'playbook.bicep' = { name: 'statNextIncidentPlaybook', params: { name: playbookName, location: location, functionAppName: functionApp.name } }
-module workspaceRbac 'workspace-rbac.bicep' = { name: 'statNextWorkspaceRbac', scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroup), params: { workspaceName: sentinelWorkspaceName, functionPrincipalId: functionApp.identity.principalId, playbookPrincipalId: playbook.outputs.principalId } }
+// Core deployment intentionally excludes the Sentinel Logic App connector.
+// The playbook is installed separately after the Function identity and core
+// Sentinel RBAC are healthy, so a transient Logic Apps connector outage cannot
+// fail the STAT Next platform deployment.
+module workspaceRbac 'workspace-rbac.bicep' = { name: 'statNextWorkspaceRbac', scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroup), params: { workspaceName: sentinelWorkspaceName, functionPrincipalId: functionApp.identity.principalId } }
 
 resource appSettings 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: functionApp
@@ -89,5 +91,4 @@ output functionPrincipalId string = functionApp.identity.principalId
 output storageAccountName string = storage.name
 output packageBlobUri string = privatePackageUri
 output workbookName string = workbook.name
-output playbookName string = playbook.outputs.playbookName
-output playbookPrincipalId string = playbook.outputs.principalId
+output playbookDeployment string = 'Deploy infrastructure/playbook-main.json after the core deployment succeeds.'
