@@ -55,7 +55,7 @@ jobs:
           sha256sum artifacts/stat-next.zip
 
   publish-portal-artifacts:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/stat-next' && !contains(github.event.head_commit.message, '[skip ci]')
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'stat-next'
     needs: [python, bicep, package]
     runs-on: ubuntu-latest
     permissions:
