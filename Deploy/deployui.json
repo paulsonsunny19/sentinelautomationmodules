@@ -1,0 +1,8 @@
+{
+  "$schema":"https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler":"Microsoft.Azure.CreateUIDef","version":"0.1.2-preview",
+  "parameters":{"basics":[],"steps":[{"name":"stat","label":"STAT Configuration","elements":[
+    {"name":"package","type":"Microsoft.Common.TextBox","label":"STAT Function Package (direct Azure Blob SAS URL)","defaultValue":"","toolTip":"Upload stat.zip to Azure Blob Storage and paste the direct read-only Blob SAS URL. GitHub release URLs redirect and are not supported.","constraints":{"required":true}},
+    {"name":"sample","type":"Microsoft.Common.CheckBox","label":"Deploy basic STAT sample playbook","defaultValue":false}
+  ]}],"outputs":{"location":"[location()]","NamingType":"default","STATFunctionName":"stat-custom","STATStorageName":"statcustom","STATConnectorName":"SentinelTriageAssistantv2","STATConnectorDisplayName":"STAT v2","storageAccountType":"Standard_LRS","FunctionPackage":"[steps('stat').package]","MSGraphEndpoint":"graph.microsoft.com","M365DEndpoint":"api.security.microsoft.com","MDEEndpoint":"api.securitycenter.microsoft.com","LogAnalyticsEndpoint":"api.loganalytics.io","AzureResourceManagerEndpoint":"management.azure.com","identityType":"system","DeployBasicSample":"[steps('stat').sample]","BasicSamplePlaybookName":"Sample-STAT-Triage"}}
+}
