@@ -1,15 +1,27 @@
-# Sentinel Automation Modules
+# STAT Next
 
-Azure deployment-compatible fork of briandelmsft/SentinelAutomationModules.
+A secure-by-default modernization of the Microsoft Sentinel Triage AssistanT concept.
 
-This fork addresses the Linux Consumption Function App restriction that prevents `WEBSITE_RUN_FROM_PACKAGE` from using redirecting GitHub Release URLs.
+STAT Next is a new implementation rather than a deployment wrapper around the legacy STAT Function package.
 
-## Deployment package fix
+## Design goals
 
-Use a direct Azure Blob Storage URL (normally a read-only Blob SAS URL) for `FunctionPackage`, for example:
+- System Assigned Managed Identity for runtime authentication.
+- No application client secrets.
+- No GitHub-release `WEBSITE_RUN_FROM_PACKAGE` bootstrap chain.
+- Least-privilege, module-specific permissions.
+- Native Microsoft Sentinel and Log Analytics modules first.
+- Microsoft Graph / Entra / Defender integrations are optional modules.
+- HTTPS only, TLS 1.2+, basic publishing disabled.
+- Infrastructure as code using Bicep.
+- Application code built and deployed through CI/CD rather than ARM downloading binaries.
+- Structured JSON responses with correlation IDs and auditable module execution.
 
-```
-https://<account>.blob.core.windows.net/<container>/stat.zip?<SAS>
-```
+## Initial modules
 
-Source: https://github.com/briandelmsft/SentinelAutomationModules
+1. `health` — service and identity health.
+2. `sentinel/incident` — retrieve Sentinel incident context.
+3. `sentinel/alerts` — retrieve alerts associated with an incident.
+4. `sentinel/related-alerts` — Log Analytics/KQL based related-alert enrichment.
+
+See `docs/ARCHITECTURE.md` and `docs/SECURITY.md`.
