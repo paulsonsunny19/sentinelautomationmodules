@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "0.1.0.0",
+  "parameters": {
+    "namePrefix": {"type":"string","defaultValue":"statnext"},
+    "sentinelResourceGroup": {"type":"string"},
+    "sentinelWorkspaceName": {"type":"string"},
+    "sentinelSubscriptionId": {"type":"string","defaultValue":"[subscription().subscriptionId]"}
+  },
+  "resources": [
+    {
+      "type":"Microsoft.Resources/deployments",
+      "apiVersion":"2022-09-01",
+      "name":"STATNextCore",
+      "properties": {
+        "mode":"Incremental",
+        "templateLink": {
+          "uri":"https://raw.githubusercontent.com/paulsonsunny19/sentinelautomationmodules/stat-next/infrastructure/main.json"
+        },
+        "parameters": {
+          "namePrefix":{"value":"[concat(parameters('namePrefix'), uniqueString(resourceGroup().id))]"},
+          "sentinelSubscriptionId":{"value":"[parameters('sentinelSubscriptionId')]"},
+          "sentinelResourceGroup":{"value":"[parameters('sentinelResourceGroup')]"},
+          "sentinelWorkspaceName":{"value":"[parameters('sentinelWorkspaceName')]"}
+        }
+      }
+    }
+  ]
+}
