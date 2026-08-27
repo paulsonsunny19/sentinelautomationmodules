@@ -9,6 +9,7 @@ var functionName = '${namePrefix}-api'
 var playbookName = '${namePrefix}-incident-triage'
 var sentinelConnectionName = '${playbookName}-sentinel'
 var sentinelManagedApiId = subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'azuresentinel')
+var incidentContextUri = 'https://${functionApp.properties.defaultHostName}/api/incident_context'
 
 resource functionApp 'Microsoft.Web/sites@2022-09-01' existing = {
   name: functionName
@@ -18,8 +19,6 @@ resource bootstrapPlaybook 'Microsoft.Logic/workflows@2019-05-01' existing = {
   name: playbookName
 }
 
-// Stage 3 runs only after Stage 2 has created the Logic App identity and the
-// Sentinel workspace RBAC assignment has had time to propagate.
 resource sentinelConnection 'Microsoft.Web/connections@2016-06-01' = {
   name: sentinelConnectionName
   location: location
@@ -56,7 +55,7 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
         }
         PlaybookVersion: {
           type: 'String'
-          defaultValue: '1.1.0'
+          defaultValue: '1.1.1'
         }
       }
       triggers: {
@@ -77,19 +76,24 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
       }
       actions: {
         Get_STAT_Next_incident_context: {
-          type: 'Function'
+          type: 'Http'
           runAfter: {}
           inputs: {
+            method: 'POST'
+            uri: incidentContextUri
+            headers: {
+              'Content-Type': 'application/json'
+            }
             body: {
-              subscriptionId: '@{triggerBody()?[\'object\']?[\'id\']?[1]}'
+              subscriptionId: '@{split(triggerBody()?[\'object\']?[\'id\'], \'/\')[2]}'
               resourceGroup: '@{triggerBody()?[\'workspaceInfo\']?[\'ResourceGroupName\']}'
               workspaceName: '@{triggerBody()?[\'workspaceInfo\']?[\'WorkspaceName\']}'
               incidentId: '@{last(split(triggerBody()?[\'object\']?[\'id\'], \'/\'))}'
             }
-            function: {
-              id: resourceId('Microsoft.Web/sites/functions', functionApp.name, 'incident_context')
+            authentication: {
+              type: 'ManagedServiceIdentity'
+              audience: 'https://management.azure.com/'
             }
-            method: 'POST'
           }
         }
         Add_STAT_Next_comment_to_incident: {
