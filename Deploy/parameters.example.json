@@ -1,0 +1,13 @@
+{
+  "$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#","contentVersion":"1.0.0.0","parameters":{
+    "NamingType":{"value":"default"},
+    "STATFunctionName":{"value":"stat-custom"},
+    "STATStorageName":{"value":"statcustom"},
+    "STATConnectorName":{"value":"SentinelTriageAssistantv2"},
+    "STATConnectorDisplayName":{"value":"STAT v2"},
+    "FunctionPackage":{"value":"https://YOURACCOUNT.blob.core.windows.net/stat/stat.zip?YOUR_READ_ONLY_SAS"},
+    "identityType":{"value":"system"},
+    "DeployBasicSample":{"value":false},
+    "BasicSamplePlaybookName":{"value":"Sample-STAT-Triage"}
+  }
+}
