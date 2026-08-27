@@ -1,4 +1,4 @@
-from src.modules.related_alerts import ALLOWED_ENTITY_COLUMNS, RelatedAlertsRequest
+from modules.related_alerts import ALLOWED_ENTITY_COLUMNS, RelatedAlertsRequest
 
 
 def test_related_alert_entity_allowlist():
