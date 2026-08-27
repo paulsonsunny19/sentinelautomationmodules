@@ -3,14 +3,11 @@ from typing import Any
 
 SEVERITY = {"high": 10, "medium": 5, "low": 3, "informational": 1, "none": 0, "unknown": 0}
 
-
 def _sev(value: Any) -> int:
     return SEVERITY.get(str(value or "unknown").lower(), 0)
 
-
 def _item(score: float, source: str) -> dict[str, Any]:
     return {"Score": score, "ScoreSource": source}
-
 
 def score_module(module: dict[str, Any], multiplier: float = 1, score_per_item: bool = True, label: str | None = None) -> list[dict[str, Any]]:
     name = str(module.get("ModuleName") or label or "Custom")
@@ -24,11 +21,13 @@ def score_module(module: dict[str, Any], multiplier: float = 1, score_per_item: 
         vals = [_sev(x.get("AlertSeverity") or x.get("severity")) for x in alerts]
         vals = vals if score_per_item else ([max(vals)] if vals else [])
         out += [_item(v * multiplier, label or "Related Alerts") for v in vals if v]
-        tactics = set(module.get("UniqueTactics", []))
-        out += [_item(len(tactics) * 10 * multiplier, label or "Related Alerts - MITRE tactics")] if tactics else []
+        # Upstream STAT adds 10 per unique MITRE tactic. RelatedAlerts emits AllTactics;
+        # retain UniqueTactics compatibility for older callers.
+        tactics = set(module.get("AllTactics") or module.get("UniqueTactics") or [])
+        if tactics:
+            out.append(_item(len(tactics) * 10 * multiplier, label or "Related Alerts - MITRE tactics"))
     elif name in ("TIModule", "ThreatIntelligenceModule"):
-        count = int(module.get("MatchedTIItemCount", 0))
-        qty = count if score_per_item else int(count > 0)
+        count = int(module.get("MatchedTIItemCount", 0)); qty = count if score_per_item else int(count > 0)
         if qty: out.append(_item(10 * qty * multiplier, label or "Threat Intelligence"))
     elif name == "WatchlistModule":
         count = int(module.get("WatchlistMatchCount", 0)); qty = count if score_per_item else int(count > 0)
@@ -37,10 +36,10 @@ def score_module(module: dict[str, Any], multiplier: float = 1, score_per_item: 
         count = int(module.get("HashesLinkedToThreatCount", 0))
         if count: out.append(_item(10 * count * multiplier, label or "File"))
     elif name in ("MCASModule", "MDCAModule"):
-        count = int(module.get("AboveThresholdCount", 0)); qty = count if score_per_item else int(count > 0)
+        count = int(module.get("AboveThresholdCount", module.get("AboveThreholdCount", 0))); qty = count if score_per_item else int(count > 0)
         if qty: out.append(_item(10 * qty * multiplier, label or "Defender for Cloud Apps"))
     elif name == "KQLModule":
-        count = int(module.get("ItemCount", 0)); qty = count if score_per_item else int(count > 0)
+        count = int(module.get("ItemCount", module.get("ResultsCount", 0))); qty = count if score_per_item else int(count > 0)
         if qty: out.append(_item(5 * qty * multiplier, label or "KQL"))
     elif name == "MDEModule":
         vals = [_sev(module.get(k)) for k in ("UsersHighestRiskScore", "HostsHighestRiskScore", "IPsHighestRiskScore")]
@@ -58,7 +57,6 @@ def score_module(module: dict[str, Any], multiplier: float = 1, score_per_item: 
             if isinstance(score, int) and not isinstance(score, bool):
                 out.append(_item(score * multiplier, str(entry.get("ScoreLabel") or label or "Custom")))
     return out
-
 
 def calculate(inputs: list[dict[str, Any]]) -> dict[str, Any]:
     details: list[dict[str, Any]] = []
