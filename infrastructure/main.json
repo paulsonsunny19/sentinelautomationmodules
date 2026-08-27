@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "17956248727940109949"
+      "templateHash": "1949401672626465967"
     }
   },
   "parameters": {
@@ -48,10 +48,12 @@
     }
   },
   "variables": {
+    "$fxv#0": "{\n  \"version\": \"Notebook/1.0\",\n  \"items\": [\n    {\n      \"type\": 1,\n      \"content\": {\n        \"json\": \"# STAT Next - Status\\nSecure-by-default operational workbook for Sentinel Triage AssistanT Next. Use the tabs below to review deployment health, telemetry and versions.\"\n      },\n      \"name\": \"Title\"\n    },\n    {\n      \"type\": 11,\n      \"content\": {\n        \"version\": \"LinkItem/1.0\",\n        \"style\": \"tabs\",\n        \"links\": [\n          {\"cellValue\":\"ActiveTab\",\"linkTarget\":\"parameter\",\"linkLabel\":\"Statistics\",\"subTarget\":\"Statistics\",\"style\":\"link\"},\n          {\"cellValue\":\"ActiveTab\",\"linkTarget\":\"parameter\",\"linkLabel\":\"Health\",\"subTarget\":\"Health\",\"style\":\"link\"},\n          {\"cellValue\":\"ActiveTab\",\"linkTarget\":\"parameter\",\"linkLabel\":\"Versions\",\"subTarget\":\"Versions\",\"style\":\"link\"}\n        ]\n      },\n      \"name\": \"Tabs Menu\"\n    },\n    {\n      \"type\": 9,\n      \"content\": {\n        \"version\": \"KqlParameterItem/1.0\",\n        \"parameters\": [\n          {\"name\":\"ActiveTab\",\"type\":1,\"isRequired\":true,\"value\":\"Statistics\",\"typeSettings\":{\"additionalResourceOptions\":[]}},\n          {\"name\":\"TimeRange\",\"label\":\"Filter time range\",\"type\":4,\"value\":{\"durationMs\":604800000}},\n          {\"name\":\"Workspace\",\"label\":\"Sentinel workspace\",\"type\":5,\"isRequired\":true,\"query\":\"resources | where type =~ 'microsoft.operationalinsights/workspaces' | project id, name\",\"queryType\":1,\"resourceType\":\"microsoft.resourcegraph/resources\",\"defaultValue\":\"value::1\"},\n          {\"name\":\"FunctionApp\",\"label\":\"STAT Next Function\",\"type\":5,\"isRequired\":true,\"query\":\"resources | where type =~ 'microsoft.web/sites' | where kind has 'functionapp' | where name startswith 'statnext' or tags['ProjectName'] =~ 'STATNext' | project id, name\",\"queryType\":1,\"resourceType\":\"microsoft.resourcegraph/resources\",\"defaultValue\":\"value::1\"}\n        ],\n        \"style\": \"pills\",\n        \"queryType\": 1,\n        \"resourceType\": \"microsoft.resourcegraph/resources\"\n      },\n      \"name\": \"Parameters\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## STAT Next deployment\\nCurrent Azure resources discovered for the STAT Next Function, managed identity, hosting plan, storage and Application Insights.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Statistics\"},\n      \"name\":\"StatisticsTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"resources\\n| where id == '{FunctionApp}'\\n| extend FunctionName=name, FunctionState=tostring(properties.state), FunctionLocation=location, PrincipalId=tostring(identity.principalId), PlanId=tostring(properties.serverFarmId)\\n| project FunctionName, FunctionState, FunctionLocation, PrincipalId, PlanId\",\n        \"queryType\":1,\n        \"resourceType\":\"microsoft.resourcegraph/resources\",\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Statistics\"},\n      \"name\":\"FunctionInventory\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"resources\\n| where type in~ ('microsoft.web/sites','microsoft.web/serverfarms','microsoft.storage/storageaccounts','microsoft.insights/components','microsoft.managedidentity/userassignedidentities')\\n| where name startswith 'statnext'\\n| project Resource=name, Type=type, Location=location, ResourceGroup=resourceGroup\",\n        \"queryType\":1,\n        \"resourceType\":\"microsoft.resourcegraph/resources\",\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Statistics\"},\n      \"name\":\"ResourceInventory\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## Function health and telemetry\\nApplication Insights request success, failures and latency for the selected STAT Next Function.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"HealthTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"requests\\n| where timestamp {TimeRange}\\n| summarize Requests=count(), Successful=countif(success == true), Failed=countif(success == false), AvgDurationMs=round(avg(duration / 1ms),2) by bin(timestamp, 15m)\\n| order by timestamp asc\",\n        \"queryType\":0,\n        \"resourceType\":\"microsoft.insights/components\",\n        \"crossComponentResources\":[\"{FunctionApp}\"],\n        \"visualization\":\"timechart\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"RequestHealth\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"exceptions\\n| where timestamp {TimeRange}\\n| summarize Failures=count() by problemId, outerMessage\\n| top 20 by Failures desc\",\n        \"queryType\":0,\n        \"resourceType\":\"microsoft.insights/components\",\n        \"crossComponentResources\":[\"{FunctionApp}\"],\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"Exceptions\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## Sentinel activity\\nRecent Sentinel incidents in the selected workspace. This view is read-only.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"SentinelTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"SecurityIncident\\n| where TimeGenerated {TimeRange}\\n| summarize Incidents=count(), High=countif(Severity =~ 'High'), Medium=countif(Severity =~ 'Medium'), Low=countif(Severity =~ 'Low') by bin(TimeGenerated, 1d)\\n| order by TimeGenerated asc\",\n        \"queryType\":0,\n        \"resourceType\":\"microsoft.operationalinsights/workspaces\",\n        \"crossComponentResources\":[\"{Workspace}\"],\n        \"visualization\":\"timechart\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"SentinelIncidents\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## STAT Next version\\nSTAT Next replaces the legacy custom connector/Logic App module version model with a single Function application package and infrastructure deployment.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Versions\"},\n      \"name\":\"VersionsTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"resources\\n| where id == '{FunctionApp}'\\n| project Component='STAT Next Function', Resource=name, Runtime=tostring(properties.siteConfig.linuxFxVersion), State=tostring(properties.state), Location=location\",\n        \"queryType\":1,\n        \"resourceType\":\"microsoft.resourcegraph/resources\",\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Versions\"},\n      \"name\":\"VersionInventory\"\n    }\n  ],\n  \"fallbackResourceIds\": [\"Azure Monitor\"]\n}\n",
     "storageName": "[take(replace(toLower(parameters('namePrefix')), '-', ''), 24)]",
     "planName": "[format('{0}-plan', parameters('namePrefix'))]",
     "functionName": "[format('{0}-api', parameters('namePrefix'))]",
     "insightsName": "[format('{0}-appi', parameters('namePrefix'))]",
+    "workbookName": "[guid(resourceGroup().id, parameters('namePrefix'), 'status-workbook')]",
     "packageContainerName": "statnext-package",
     "packageBlobName": "stat-next.zip",
     "stagingIdentityName": "[format('{0}-stage', take(parameters('namePrefix'), 40))]",
@@ -290,6 +292,26 @@
       ]
     },
     {
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2023-06-01",
+      "name": "[variables('workbookName')]",
+      "location": "[parameters('location')]",
+      "kind": "shared",
+      "properties": {
+        "displayName": "Sentinel Triage AssistanT Next - Status",
+        "serializedData": "[variables('$fxv#0')]",
+        "version": "1.0",
+        "sourceId": "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+        "category": "workbook",
+        "description": "STAT Next sample operational workbook based on the original STAT Status workbook."
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('sentinelSubscriptionId'), parameters('sentinelResourceGroup')), 'Microsoft.Resources/deployments', 'statNextWorkspaceRbac')]"
+      ]
+    },
+    {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "statNextWorkspaceRbac",
@@ -377,6 +399,10 @@
     "packageBlobUri": {
       "type": "string",
       "value": "[format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName'))]"
+    },
+    "workbookName": {
+      "type": "string",
+      "value": "[variables('workbookName')]"
     }
   }
 }
