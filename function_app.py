@@ -38,7 +38,7 @@ def health(req):return response({'service':'STAT Next','status':'healthy','modul
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
-def stat_base(req):return execute(req,'stat_base',('entities','incidentArmId','workspaceId'),lambda b:normalize(b['entities'],b['incidentArmId'],b['workspaceId'],b.get('tenantId'),b.get('tenantDisplayName')))
+def stat_base(req):return execute(req,'stat_base',('incidentArmId','workspaceId'),lambda b:normalize(b.get('entities') or [],b['incidentArmId'],b['workspaceId'],b.get('tenantId'),b.get('tenantDisplayName')))
 @app.route(route='stat_aad_risks',methods=['POST'])
 def stat_aad_risks(req):return execute(req,'stat_aad_risks',('workspaceId','base'),lambda b:query_aad_risks(AADRisksRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),bool(b.get('mfaFailureLookup',True)),bool(b.get('mfaFraudLookup',True)))))
 @app.route(route='stat_related_alerts',methods=['POST'])
