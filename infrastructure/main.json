@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13719650377338591118"
+      "templateHash": "17956248727940109949"
     }
   },
   "parameters": {
@@ -43,7 +43,7 @@
     "packageUri": {
       "type": "string",
       "metadata": {
-        "description": "Direct HTTPS URL for the pinned STAT Next application ZIP. Must not redirect."
+        "description": "Public source URL used only to stage the validated package into private Azure Blob Storage."
       }
     }
   },
@@ -52,7 +52,12 @@
     "planName": "[format('{0}-plan', parameters('namePrefix'))]",
     "functionName": "[format('{0}-api', parameters('namePrefix'))]",
     "insightsName": "[format('{0}-appi', parameters('namePrefix'))]",
-    "storageBlobDataOwnerRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]"
+    "packageContainerName": "statnext-package",
+    "packageBlobName": "stat-next.zip",
+    "stagingIdentityName": "[format('{0}-stage', take(parameters('namePrefix'), 40))]",
+    "storageBlobDataOwnerRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
+    "storageBlobDataReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]",
+    "storageBlobDataContributorRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
   },
   "resources": [
     {
@@ -72,6 +77,91 @@
         "defaultToOAuthAuthentication": true,
         "publicNetworkAccess": "Enabled"
       }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}', variables('storageName'), 'default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}/{2}', variables('storageName'), 'default', variables('packageContainerName'))]",
+      "properties": {
+        "publicAccess": "None"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('stagingIdentityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')), 'package-stage-writer')]",
+      "properties": {
+        "roleDefinitionId": "[variables('storageBlobDataContributorRole')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deploymentScripts",
+      "apiVersion": "2023-08-01",
+      "name": "StageSTATNextPackage",
+      "location": "[parameters('location')]",
+      "kind": "AzureCLI",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')))]": {}
+        }
+      },
+      "properties": {
+        "azCliVersion": "2.67.0",
+        "timeout": "PT15M",
+        "cleanupPreference": "OnSuccess",
+        "retentionInterval": "P1D",
+        "forceUpdateTag": "[parameters('packageUri')]",
+        "environmentVariables": [
+          {
+            "name": "SOURCE_URI",
+            "value": "[parameters('packageUri')]"
+          },
+          {
+            "name": "STORAGE_ACCOUNT",
+            "value": "[variables('storageName')]"
+          },
+          {
+            "name": "CONTAINER",
+            "value": "[variables('packageContainerName')]"
+          },
+          {
+            "name": "BLOB_NAME",
+            "value": "[variables('packageBlobName')]"
+          }
+        ],
+        "scriptContent": "      set -euo pipefail\n      az storage blob copy start --account-name \"$STORAGE_ACCOUNT\" --destination-container \"$CONTAINER\" --destination-blob \"$BLOB_NAME\" --source-uri \"$SOURCE_URI\" --auth-mode login --only-show-errors\n      for i in $(seq 1 60); do\n        status=$(az storage blob show --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --auth-mode login --query properties.copy.status -o tsv 2>/dev/null || true)\n        if [ \"$status\" = \"success\" ]; then exit 0; fi\n        if [ \"$status\" = \"failed\" ] || [ \"$status\" = \"aborted\" ]; then echo \"Package staging failed: $status\" >&2; exit 1; fi\n        sleep 5\n      done\n      echo \"Timed out waiting for package staging\" >&2\n      exit 1\n    "
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', variables('packageContainerName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')), 'package-stage-writer'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
     },
     {
       "type": "Microsoft.Insights/components",
@@ -114,55 +204,12 @@
           "linuxFxVersion": "PYTHON|3.12",
           "minTlsVersion": "1.2",
           "ftpsState": "Disabled",
-          "http20Enabled": true,
-          "appSettings": [
-            {
-              "name": "FUNCTIONS_EXTENSION_VERSION",
-              "value": "~4"
-            },
-            {
-              "name": "FUNCTIONS_WORKER_RUNTIME",
-              "value": "python"
-            },
-            {
-              "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
-              "value": "true"
-            },
-            {
-              "name": "ENABLE_ORYX_BUILD",
-              "value": "true"
-            },
-            {
-              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-              "value": "[reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString]"
-            },
-            {
-              "name": "AzureWebJobsStorage__accountName",
-              "value": "[variables('storageName')]"
-            },
-            {
-              "name": "AzureWebJobsStorage__credential",
-              "value": "managedidentity"
-            },
-            {
-              "name": "AzureWebJobsStorage__blobServiceUri",
-              "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob]"
-            },
-            {
-              "name": "AzureWebJobsStorage__queueServiceUri",
-              "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue]"
-            },
-            {
-              "name": "AzureWebJobsStorage__tableServiceUri",
-              "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table]"
-            }
-          ]
+          "http20Enabled": true
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+        "[resourceId('Microsoft.Resources/deploymentScripts', 'StageSTATNextPackage')]"
       ]
     },
     {
@@ -178,6 +225,46 @@
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'package-reader')]",
+      "properties": {
+        "roleDefinitionId": "[variables('storageBlobDataReaderRole')]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', variables('functionName'), 'appsettings')]",
+      "properties": {
+        "FUNCTIONS_EXTENSION_VERSION": "~4",
+        "FUNCTIONS_WORKER_RUNTIME": "python",
+        "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString]",
+        "AzureWebJobsStorage__accountName": "[variables('storageName')]",
+        "AzureWebJobsStorage__credential": "managedidentity",
+        "AzureWebJobsStorage__blobServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob]",
+        "AzureWebJobsStorage__queueServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue]",
+        "AzureWebJobsStorage__tableServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table]",
+        "WEBSITE_RUN_FROM_PACKAGE": "[format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName'))]",
+        "WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage'))]",
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'package-reader'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('sentinelSubscriptionId'), parameters('sentinelResourceGroup')), 'Microsoft.Resources/deployments', 'statNextWorkspaceRbac')]"
       ]
     },
     {
@@ -272,65 +359,6 @@
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
       ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "statNextApplication",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "functionName": {
-            "value": "[variables('functionName')]"
-          },
-          "packageUri": {
-            "value": "[parameters('packageUri')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.46.1.21595",
-              "templateHash": "12968328385512022501"
-            }
-          },
-          "parameters": {
-            "functionName": {
-              "type": "string"
-            },
-            "packageUri": {
-              "type": "string",
-              "metadata": {
-                "description": "Direct HTTPS URL to a deterministic STAT Next application ZIP. Redirecting URLs are not supported."
-              }
-            }
-          },
-          "resources": [
-            {
-              "type": "Microsoft.Web/sites/extensions",
-              "apiVersion": "2022-09-01",
-              "name": "[format('{0}/{1}', parameters('functionName'), 'onedeploy')]",
-              "properties": {
-                "packageUri": "[parameters('packageUri')]",
-                "remoteBuild": true
-              }
-            }
-          ]
-        }
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Web/sites/basicPublishingCredentialsPolicies', variables('functionName'), 'ftp')]",
-        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
-        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage'))]",
-        "[resourceId('Microsoft.Web/sites/basicPublishingCredentialsPolicies', variables('functionName'), 'scm')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('sentinelSubscriptionId'), parameters('sentinelResourceGroup')), 'Microsoft.Resources/deployments', 'statNextWorkspaceRbac')]"
-      ]
     }
   ],
   "outputs": {
@@ -345,6 +373,10 @@
     "storageAccountName": {
       "type": "string",
       "value": "[variables('storageName')]"
+    },
+    "packageBlobUri": {
+      "type": "string",
+      "value": "[format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName'))]"
     }
   }
 }
