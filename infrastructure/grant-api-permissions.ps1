@@ -1,10 +1,14 @@
 # STAT Next - tenant API permissions for the Function App managed identity
 # Run as a tenant administrator after the core deployment creates the Function identity.
-# Requires Microsoft Graph PowerShell or Azure CLI with permission to create app-role assignments.
+# Requires Azure CLI with permission to create Microsoft Graph app-role assignments.
 #
-# This intentionally grants only permissions used by the current implementation:
+# This intentionally grants only application permissions used by STAT Next:
 #   Microsoft Graph: IdentityRiskyUser.Read.All
 #   WindowsDefenderATP: AdvancedQuery.Read.All, Machine.Read.All
+#   Microsoft Cloud App Security: Investigation.Read
+#
+# No client secret is created: the Azure Function uses its managed identity to obtain
+# OAuth tokens for each resource.
 #
 # Usage:
 #   ./grant-api-permissions.ps1 -FunctionPrincipalId '<managed-identity-object-id>'
@@ -26,24 +30,24 @@ function Get-ServicePrincipalByAppId([string]$appId) {
 
 function Grant-AppRole([string]$resourceAppId, [string]$roleValue) {
   $resource = Get-ServicePrincipalByAppId $resourceAppId
-  $role = @($resource.appRoles | Where-Object { $_.value -eq $roleValue -and $_.allowedMemberTypes -contains 'Application' })[0]
-  if (-not $role) { throw "Application role '$roleValue' was not exposed by resource $resourceAppId." }
+  $role = @($resource.appRoles | Where-Object { $_.value -ieq $roleValue -and $_.allowedMemberTypes -contains 'Application' })[0]
+  if (-not $role) { throw "Application role '$roleValue' was not exposed by resource $resourceAppId ($($resource.displayName))." }
 
   $existing = az rest --method GET --url "https://graph.microsoft.com/v1.0/servicePrincipals/$FunctionPrincipalId/appRoleAssignments" -o json | ConvertFrom-Json
   $match = @($existing.value | Where-Object { $_.resourceId -eq $resource.id -and $_.appRoleId -eq $role.id })
   if ($match.Count -gt 0) {
-    Write-Host "Already granted: $roleValue"
+    Write-Host "Already granted: $roleValue on $($resource.displayName)"
     return
   }
 
   if ($PSCmdlet.ShouldProcess($FunctionPrincipalId, "Grant $roleValue on $($resource.displayName)")) {
     $body = @{ principalId=$FunctionPrincipalId; resourceId=$resource.id; appRoleId=$role.id } | ConvertTo-Json -Compress
     az rest --method POST --url "https://graph.microsoft.com/v1.0/servicePrincipals/$FunctionPrincipalId/appRoleAssignments" --headers 'Content-Type=application/json' --body $body --output none
-    Write-Host "Granted: $roleValue"
+    Write-Host "Granted: $roleValue on $($resource.displayName)"
   }
 }
 
-# Microsoft Graph
+# Microsoft Graph / Entra ID Protection
 Grant-AppRole '00000003-0000-0000-c000-000000000000' 'IdentityRiskyUser.Read.All'
 
 # Microsoft Defender for Endpoint / WindowsDefenderATP
@@ -51,5 +55,10 @@ $defender = az ad sp list --filter "displayName eq 'WindowsDefenderATP'" --query
 if (-not $defender -or -not $defender.appId) { throw 'WindowsDefenderATP enterprise application was not found in this tenant.' }
 Grant-AppRole $defender.appId 'AdvancedQuery.Read.All'
 Grant-AppRole $defender.appId 'Machine.Read.All'
+
+# Microsoft Defender for Cloud Apps. The resource application ID is documented by
+# Microsoft for application-context OAuth. Investigation.Read is sufficient for the
+# read-only entities/investigation operations used by the STAT MCAS compatibility module.
+Grant-AppRole '05a65629-4c1b-48c1-a78b-804c4abdd4af' 'Investigation.Read'
 
 Write-Host 'STAT Next Function API permissions are configured.'
