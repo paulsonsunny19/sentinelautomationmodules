@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9519012324670256373"
+      "templateHash": "17879930211061879928"
     }
   },
   "parameters": {
@@ -46,6 +46,13 @@
         "description": "Public source URL used only to stage the validated package into private Azure Blob Storage."
       }
     },
+    "packageDeploymentId": {
+      "type": "string",
+      "defaultValue": "[utcNow('yyyyMMddHHmmss')]",
+      "metadata": {
+        "description": "Deployment nonce used to force a fresh package download. Leave the default for a new deployment; change it for an intentional package refresh."
+      }
+    },
     "defenderCloudAppsApiUrl": {
       "type": "string",
       "defaultValue": "",
@@ -62,7 +69,7 @@
     "insightsName": "[format('{0}-appi', parameters('namePrefix'))]",
     "workbookName": "[guid(resourceGroup().id, parameters('namePrefix'), 'status-workbook')]",
     "packageContainerName": "statnext-package",
-    "packageBlobName": "stat-next.zip",
+    "packageBlobName": "[format('stat-next-{0}.zip', parameters('packageDeploymentId'))]",
     "stagingIdentityName": "[format('{0}-stage', take(parameters('namePrefix'), 40))]",
     "storageBlobDataOwnerRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
     "storageBlobDataReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]",
@@ -144,7 +151,7 @@
         "timeout": "PT15M",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
-        "forceUpdateTag": "[parameters('packageUri')]",
+        "forceUpdateTag": "[parameters('packageDeploymentId')]",
         "environmentVariables": [
           {
             "name": "SOURCE_URI",
@@ -163,7 +170,7 @@
             "value": "[variables('packageBlobName')]"
           }
         ],
-        "scriptContent": "      set -euo pipefail\n      az storage blob copy start --account-name \"$STORAGE_ACCOUNT\" --destination-container \"$CONTAINER\" --destination-blob \"$BLOB_NAME\" --source-uri \"$SOURCE_URI\" --auth-mode login --only-show-errors\n      for i in $(seq 1 60); do\n        status=$(az storage blob show --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --auth-mode login --query properties.copy.status -o tsv 2>/dev/null || true)\n        if [ \"$status\" = \"success\" ]; then exit 0; fi\n        if [ \"$status\" = \"failed\" ] || [ \"$status\" = \"aborted\" ]; then echo \"Package staging failed: $status\" >&2; exit 1; fi\n        sleep 5\n      done\n      echo \"Timed out waiting for package staging\" >&2\n      exit 1\n    "
+        "scriptContent": "      set -euo pipefail\n      tmp=/tmp/stat-next.zip\n      curl --fail --location --retry 3 --output \"$tmp\" \"$SOURCE_URI\"\n      test -s \"$tmp\"\n      python3 - <<'PY'\nimport zipfile\np='/tmp/stat-next.zip'\nwith zipfile.ZipFile(p) as z:\n    names=set(z.namelist())\n    if 'function_app.py' not in names:\n        raise SystemExit('Invalid STAT package: function_app.py missing from ZIP root')\n    data=z.read('function_app.py').decode('utf-8')\n    required=['stat_base','stat_aad_risks','stat_related_alerts','stat_threat_intel','stat_watchlist','stat_kql','stat_mde','stat_ueba','stat_file','stat_mcas','stat_scoring']\n    missing=[x for x in required if x not in data]\n    if missing:\n        raise SystemExit('Invalid/incomplete STAT package; missing routes: '+','.join(missing))\nprint('STAT package validation passed')\nPY\n      az storage blob upload --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --file \"$tmp\" --overwrite true --auth-mode login --only-show-errors\n      az storage blob show --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --auth-mode login --query '{name:name,size:properties.contentLength}' -o json\n    "
       },
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', variables('packageContainerName'))]",
@@ -299,7 +306,7 @@
         "version": "1.0",
         "sourceId": "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
         "category": "workbook",
-        "description": "STAT Next sample operational workbook based on the original STAT Status workbook."
+        "description": "STAT Next operational workbook based on the original STAT Status workbook."
       },
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
@@ -413,6 +420,10 @@
       "type": "string",
       "value": "[format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName'))]"
     },
+    "packageDeploymentId": {
+      "type": "string",
+      "value": "[parameters('packageDeploymentId')]"
+    },
     "workbookName": {
       "type": "string",
       "value": "[variables('workbookName')]"
@@ -423,7 +434,7 @@
     },
     "playbookDeployment": {
       "type": "string",
-      "value": "Deploy infrastructure/playbook-main.json after the core deployment succeeds."
+      "value": "Deploy infrastructure/playbook-activate.json only after the complete Function set is healthy."
     }
   }
 }
