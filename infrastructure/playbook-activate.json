@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "5963619399376415891"
+      "templateHash": "7520091685681300198"
     }
   },
   "parameters": {
@@ -67,7 +67,7 @@
             },
             "PlaybookVersion": {
               "type": "String",
-              "defaultValue": "1.1.0"
+              "defaultValue": "1.1.1"
             }
           },
           "triggers": {
@@ -88,19 +88,24 @@
           },
           "actions": {
             "Get_STAT_Next_incident_context": {
-              "type": "Function",
+              "type": "Http",
               "runAfter": {},
               "inputs": {
+                "method": "POST",
+                "uri": "[format('https://{0}/api/incident_context', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName)]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
                 "body": {
-                  "subscriptionId": "@{triggerBody()?['object']?['id']?[1]}",
+                  "subscriptionId": "@{split(triggerBody()?['object']?['id'], '/')[2]}",
                   "resourceGroup": "@{triggerBody()?['workspaceInfo']?['ResourceGroupName']}",
                   "workspaceName": "@{triggerBody()?['workspaceInfo']?['WorkspaceName']}",
                   "incidentId": "@{last(split(triggerBody()?['object']?['id'], '/'))}"
                 },
-                "function": {
-                  "id": "[resourceId('Microsoft.Web/sites/functions', variables('functionName'), 'incident_context')]"
-                },
-                "method": "POST"
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
               }
             },
             "Add_STAT_Next_comment_to_incident": {
