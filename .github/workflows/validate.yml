@@ -38,10 +38,13 @@ jobs:
       - run: az bicep install
       - name: Validate core template
         run: az bicep build --file infrastructure/main.bicep --outfile /tmp/main.json
-      - name: Validate second-stage Sentinel playbook template
+      - name: Validate playbook bootstrap template
         run: az bicep build --file infrastructure/playbook-main.bicep --outfile /tmp/playbook-main.json
+      - name: Validate playbook activation template
+        run: az bicep build --file infrastructure/playbook-activate.bicep --outfile /tmp/playbook-activate.json
       - run: python -m json.tool /tmp/main.json >/dev/null
       - run: python -m json.tool /tmp/playbook-main.json >/dev/null
+      - run: python -m json.tool /tmp/playbook-activate.json >/dev/null
 
   package:
     runs-on: ubuntu-latest
@@ -88,6 +91,7 @@ jobs:
           az bicep install
           az bicep build --file infrastructure/main.bicep --outfile infrastructure/main.json
           az bicep build --file infrastructure/playbook-main.bicep --outfile infrastructure/playbook-main.json
+          az bicep build --file infrastructure/playbook-activate.bicep --outfile infrastructure/playbook-activate.json
           rm -rf .python_packages package-root
           mkdir -p .python_packages/lib/site-packages package-root/modules artifacts
           pip install --disable-pip-version-check --no-compile -r requirements.txt --target .python_packages/lib/site-packages
@@ -100,7 +104,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add infrastructure/main.json infrastructure/playbook-main.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
+          git add infrastructure/main.json infrastructure/playbook-main.json infrastructure/playbook-activate.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
           if git diff --cached --quiet; then exit 0; fi
           git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
           for attempt in 1 2 3; do
