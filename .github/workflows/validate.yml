@@ -75,6 +75,9 @@ jobs:
   publish-portal-artifacts:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'stat-next'
     needs: [python, bicep, package]
+    concurrency:
+      group: stat-next-portal-artifacts
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,34 +89,42 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build stable Portal artifacts
+      - name: Build and publish stable Portal artifacts
         run: |
-          az bicep install
-          az bicep build --file infrastructure/main.bicep --outfile infrastructure/main.json
-          az bicep build --file infrastructure/playbook-main.bicep --outfile infrastructure/playbook-main.json
-          az bicep build --file infrastructure/playbook-activate.bicep --outfile infrastructure/playbook-activate.json
-          rm -rf .python_packages package-root
-          mkdir -p .python_packages/lib/site-packages package-root/modules artifacts
-          pip install --disable-pip-version-check --no-compile -r requirements.txt --target .python_packages/lib/site-packages
-          cp function_app.py host.json requirements.txt package-root/
-          cp -R modules package-root/
-          cp -R .python_packages package-root/
-          (cd package-root && zip -X -r ../artifacts/stat-next.zip . -x '*/__pycache__/*' '*.pyc')
-          sha256sum artifacts/stat-next.zip | tee artifacts/stat-next.zip.sha256
-      - name: Publish artifacts to stat-next branch
-        run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add infrastructure/main.json infrastructure/playbook-main.json infrastructure/playbook-activate.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
+          az bicep install
+
           for attempt in 1 2 3; do
+            # Always regenerate artifacts from the newest remote stat-next tip.
+            # This avoids rebasing commits containing the binary ZIP, which was
+            # the source of the previous publication conflict.
             git fetch origin stat-next
-            if git rebase origin/stat-next && git push origin HEAD:stat-next; then
-              exit 0
-            fi
-            git rebase --abort || true
+            git reset --hard origin/stat-next
+            git clean -fdx
+
+            az bicep build --file infrastructure/main.bicep --outfile infrastructure/main.json
+            az bicep build --file infrastructure/playbook-main.bicep --outfile infrastructure/playbook-main.json
+            az bicep build --file infrastructure/playbook-activate.bicep --outfile infrastructure/playbook-activate.json
+
+            mkdir -p .python_packages/lib/site-packages package-root/modules artifacts
+            pip install --disable-pip-version-check --no-compile -r requirements.txt --target .python_packages/lib/site-packages
+            cp function_app.py host.json requirements.txt package-root/
+            cp -R modules package-root/
+            cp -R .python_packages package-root/
+            (cd package-root && zip -X -r ../artifacts/stat-next.zip . -x '*/__pycache__/*' '*.pyc')
+            sha256sum artifacts/stat-next.zip | tee artifacts/stat-next.zip.sha256
+
+            git add infrastructure/main.json infrastructure/playbook-main.json infrastructure/playbook-activate.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
+
+            # Push only if remote has not moved since this attempt started.
+            if git push origin HEAD:stat-next; then exit 0; fi
+            echo "Remote changed during publish attempt $attempt; rebuilding from latest tip."
             sleep $((attempt * 2))
           done
-          echo 'Failed to publish artifacts after 3 attempts.' >&2
+
+          echo 'Failed to publish artifacts after 3 clean rebuild attempts.' >&2
           exit 1
