@@ -1,0 +1,141 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# STAT Next - Status\nSecure-by-default operational workbook for Sentinel Triage AssistanT Next. Use the tabs below to review deployment health, telemetry and versions."
+      },
+      "name": "Title"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {"cellValue":"ActiveTab","linkTarget":"parameter","linkLabel":"Statistics","subTarget":"Statistics","style":"link"},
+          {"cellValue":"ActiveTab","linkTarget":"parameter","linkLabel":"Health","subTarget":"Health","style":"link"},
+          {"cellValue":"ActiveTab","linkTarget":"parameter","linkLabel":"Versions","subTarget":"Versions","style":"link"}
+        ]
+      },
+      "name": "Tabs Menu"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {"name":"ActiveTab","type":1,"isRequired":true,"value":"Statistics","typeSettings":{"additionalResourceOptions":[]}},
+          {"name":"TimeRange","label":"Filter time range","type":4,"value":{"durationMs":604800000}},
+          {"name":"Workspace","label":"Sentinel workspace","type":5,"isRequired":true,"query":"resources | where type =~ 'microsoft.operationalinsights/workspaces' | project id, name","queryType":1,"resourceType":"microsoft.resourcegraph/resources","defaultValue":"value::1"},
+          {"name":"FunctionApp","label":"STAT Next Function","type":5,"isRequired":true,"query":"resources | where type =~ 'microsoft.web/sites' | where kind has 'functionapp' | where name startswith 'statnext' or tags['ProjectName'] =~ 'STATNext' | project id, name","queryType":1,"resourceType":"microsoft.resourcegraph/resources","defaultValue":"value::1"}
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "Parameters"
+    },
+    {
+      "type": 1,
+      "content": {"json":"## STAT Next deployment\nCurrent Azure resources discovered for the STAT Next Function, managed identity, hosting plan, storage and Application Insights."},
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Statistics"},
+      "name":"StatisticsTitle"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version":"KqlItem/1.0",
+        "query":"resources\n| where id == '{FunctionApp}'\n| extend FunctionName=name, FunctionState=tostring(properties.state), FunctionLocation=location, PrincipalId=tostring(identity.principalId), PlanId=tostring(properties.serverFarmId)\n| project FunctionName, FunctionState, FunctionLocation, PrincipalId, PlanId",
+        "queryType":1,
+        "resourceType":"microsoft.resourcegraph/resources",
+        "visualization":"table"
+      },
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Statistics"},
+      "name":"FunctionInventory"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version":"KqlItem/1.0",
+        "query":"resources\n| where type in~ ('microsoft.web/sites','microsoft.web/serverfarms','microsoft.storage/storageaccounts','microsoft.insights/components','microsoft.managedidentity/userassignedidentities')\n| where name startswith 'statnext'\n| project Resource=name, Type=type, Location=location, ResourceGroup=resourceGroup",
+        "queryType":1,
+        "resourceType":"microsoft.resourcegraph/resources",
+        "visualization":"table"
+      },
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Statistics"},
+      "name":"ResourceInventory"
+    },
+    {
+      "type": 1,
+      "content": {"json":"## Function health and telemetry\nApplication Insights request success, failures and latency for the selected STAT Next Function."},
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Health"},
+      "name":"HealthTitle"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version":"KqlItem/1.0",
+        "query":"requests\n| where timestamp {TimeRange}\n| summarize Requests=count(), Successful=countif(success == true), Failed=countif(success == false), AvgDurationMs=round(avg(duration / 1ms),2) by bin(timestamp, 15m)\n| order by timestamp asc",
+        "queryType":0,
+        "resourceType":"microsoft.insights/components",
+        "crossComponentResources":["{FunctionApp}"],
+        "visualization":"timechart"
+      },
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Health"},
+      "name":"RequestHealth"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version":"KqlItem/1.0",
+        "query":"exceptions\n| where timestamp {TimeRange}\n| summarize Failures=count() by problemId, outerMessage\n| top 20 by Failures desc",
+        "queryType":0,
+        "resourceType":"microsoft.insights/components",
+        "crossComponentResources":["{FunctionApp}"],
+        "visualization":"table"
+      },
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Health"},
+      "name":"Exceptions"
+    },
+    {
+      "type": 1,
+      "content": {"json":"## Sentinel activity\nRecent Sentinel incidents in the selected workspace. This view is read-only."},
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Health"},
+      "name":"SentinelTitle"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version":"KqlItem/1.0",
+        "query":"SecurityIncident\n| where TimeGenerated {TimeRange}\n| summarize Incidents=count(), High=countif(Severity =~ 'High'), Medium=countif(Severity =~ 'Medium'), Low=countif(Severity =~ 'Low') by bin(TimeGenerated, 1d)\n| order by TimeGenerated asc",
+        "queryType":0,
+        "resourceType":"microsoft.operationalinsights/workspaces",
+        "crossComponentResources":["{Workspace}"],
+        "visualization":"timechart"
+      },
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Health"},
+      "name":"SentinelIncidents"
+    },
+    {
+      "type": 1,
+      "content": {"json":"## STAT Next version\nSTAT Next replaces the legacy custom connector/Logic App module version model with a single Function application package and infrastructure deployment."},
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Versions"},
+      "name":"VersionsTitle"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version":"KqlItem/1.0",
+        "query":"resources\n| where id == '{FunctionApp}'\n| project Component='STAT Next Function', Resource=name, Runtime=tostring(properties.siteConfig.linuxFxVersion), State=tostring(properties.state), Location=location",
+        "queryType":1,
+        "resourceType":"microsoft.resourcegraph/resources",
+        "visualization":"table"
+      },
+      "conditionalVisibility":{"parameterName":"ActiveTab","comparison":"isEqualTo","value":"Versions"},
+      "name":"VersionInventory"
+    }
+  ],
+  "fallbackResourceIds": ["Azure Monitor"]
+}
