@@ -4,16 +4,18 @@ targetScope = 'resourceGroup'
 @minLength(5)
 param namePrefix string = 'statnext${uniqueString(resourceGroup().id)}'
 param location string = resourceGroup().location
-@description('Resource ID of the Log Analytics workspace used by Microsoft Sentinel.')
-param sentinelWorkspaceResourceId string
+@description('Subscription containing the Sentinel workspace.')
+param sentinelSubscriptionId string = subscription().subscriptionId
+@description('Resource group containing the Sentinel workspace.')
+param sentinelResourceGroup string
+@description('Log Analytics workspace used by Microsoft Sentinel.')
+param sentinelWorkspaceName string
 
 var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
 var functionName = '${namePrefix}-api'
 var insightsName = '${namePrefix}-appi'
 var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
-var logAnalyticsReaderRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','73c42c96-874c-492b-b04d-ab87d138a893')
-var sentinelReaderRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','8d289c81-5878-46d4-8554-54e1e3d8b5cb')
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageName
@@ -83,21 +85,13 @@ resource hostStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
-resource workspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' existing = {
-  scope: resourceGroup(split(sentinelWorkspaceResourceId, '/')[4], split(sentinelWorkspaceResourceId, '/')[8])
-  name: split(sentinelWorkspaceResourceId, '/')[8]
-}
-
-resource logReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sentinelWorkspaceResourceId, functionApp.id, 'log-reader')
-  scope: workspace
-  properties: { roleDefinitionId: logAnalyticsReaderRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' }
-}
-
-resource sentinelReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sentinelWorkspaceResourceId, functionApp.id, 'sentinel-reader')
-  scope: workspace
-  properties: { roleDefinitionId: sentinelReaderRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' }
+module workspaceRbac 'workspace-rbac.bicep' = {
+  name: 'statNextWorkspaceRbac'
+  scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroup)
+  params: {
+    workspaceName: sentinelWorkspaceName
+    functionPrincipalId: functionApp.identity.principalId
+  }
 }
 
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'ftp', properties: { allow: false } }
