@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "979592399242551024"
+      "templateHash": "5998800080010973362"
     }
   },
   "parameters": {
@@ -22,22 +22,63 @@
     },
     "sentinelSubscriptionId": {
       "type": "string",
-      "defaultValue": "[subscription().subscriptionId]",
-      "metadata": {
-        "description": "Subscription containing the Microsoft Sentinel workspace."
-      }
+      "defaultValue": "[subscription().subscriptionId]"
     },
     "sentinelResourceGroup": {
-      "type": "string",
-      "metadata": {
-        "description": "Resource group containing the Microsoft Sentinel workspace."
-      }
+      "type": "string"
     },
     "sentinelWorkspaceName": {
+      "type": "string"
+    },
+    "sentinelWorkspaceId": {
       "type": "string",
       "metadata": {
-        "description": "Log Analytics workspace used by Microsoft Sentinel."
+        "description": "Log Analytics workspace customer ID (GUID), used by Logs Query modules."
       }
+    },
+    "enrichmentKql": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional KQL enrichment query. Leave blank to skip KQL module."
+      }
+    },
+    "watchlistAlias": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional Sentinel watchlist alias. Leave blank to skip Watchlist module."
+      }
+    },
+    "watchlistKey": {
+      "type": "string",
+      "defaultValue": "SearchKey"
+    },
+    "watchlistKeyDataType": {
+      "type": "string",
+      "defaultValue": "upn",
+      "allowedValues": [
+        "upn",
+        "ip",
+        "cidr",
+        "fqdn"
+      ]
+    },
+    "mcasScoreThreshold": {
+      "type": "int",
+      "defaultValue": 0
+    },
+    "lowScoreThreshold": {
+      "type": "int",
+      "defaultValue": 10
+    },
+    "mediumScoreThreshold": {
+      "type": "int",
+      "defaultValue": 30
+    },
+    "highScoreThreshold": {
+      "type": "int",
+      "defaultValue": 60
     }
   },
   "variables": {
@@ -74,7 +115,7 @@
         "state": "Enabled",
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-          "contentVersion": "1.0.0.0",
+          "contentVersion": "2.0.0.0",
           "parameters": {
             "$connections": {
               "type": "Object",
@@ -86,7 +127,7 @@
             },
             "PlaybookVersion": {
               "type": "String",
-              "defaultValue": "1.1.2"
+              "defaultValue": "2.0.0-full"
             }
           },
           "triggers": {
@@ -106,12 +147,12 @@
             }
           },
           "actions": {
-            "Get_STAT_Next_incident_context": {
+            "Get_incident_context": {
               "type": "Http",
               "runAfter": {},
               "inputs": {
                 "method": "POST",
-                "uri": "[format('https://{0}/api/incident_context', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName)]",
+                "uri": "[format('{0}/incident_context', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
                 "headers": {
                   "Content-Type": "application/json"
                 },
@@ -127,17 +168,350 @@
                 }
               }
             },
-            "Add_STAT_Next_comment_to_incident": {
+            "Build_STAT_Base": {
+              "type": "Http",
+              "runAfter": {
+                "Get_incident_context": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_base', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "entities": "@body('Get_incident_context')?['entities']",
+                  "incidentArmId": "@triggerBody()?['object']?['id']",
+                  "workspaceId": "[parameters('sentinelWorkspaceId')]",
+                  "tenantId": "@body('Get_incident_context')?['tenantId']"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "AAD_Risks": {
+              "type": "Http",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_aad_risks', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "workspaceId": "[parameters('sentinelWorkspaceId')]",
+                  "base": "@body('Build_STAT_Base')",
+                  "lookbackDays": 14
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "Threat_Intelligence": {
+              "type": "Http",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_threat_intel', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "workspaceId": "[parameters('sentinelWorkspaceId')]",
+                  "base": "@body('Build_STAT_Base')",
+                  "lookbackDays": 14
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "MDE": {
+              "type": "Http",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_mde', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "base": "@body('Build_STAT_Base')",
+                  "lookbackDays": 14
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "UEBA": {
+              "type": "Http",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_ueba', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "workspaceId": "[parameters('sentinelWorkspaceId')]",
+                  "base": "@body('Build_STAT_Base')",
+                  "lookbackDays": 14,
+                  "minimumInvestigationPriority": 1
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "File_Insights": {
+              "type": "Http",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_file', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "base": "@body('Build_STAT_Base')"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "Defender_for_Cloud_Apps": {
+              "type": "Http",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_mcas', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "base": "@body('Build_STAT_Base')",
+                  "scoreThreshold": "[parameters('mcasScoreThreshold')]"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "Optional_KQL": {
+              "type": "If",
+              "expression": "[format('@not(empty(''{0}''))', replace(parameters('enrichmentKql'), '''', ''''''))]",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "actions": {
+                "Run_KQL": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "[format('{0}/stat_kql', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                    "headers": {
+                      "Content-Type": "application/json"
+                    },
+                    "body": {
+                      "workspaceId": "[parameters('sentinelWorkspaceId')]",
+                      "base": "@body('Build_STAT_Base')",
+                      "query": "[parameters('enrichmentKql')]",
+                      "lookbackDays": 14
+                    },
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://management.azure.com/"
+                    }
+                  }
+                }
+              },
+              "else": {
+                "actions": {
+                  "KQL_Skipped": {
+                    "type": "Compose",
+                    "inputs": {
+                      "ModuleName": "KQLModule",
+                      "ResultsCount": 0,
+                      "ResultsFound": false,
+                      "ItemCount": 0
+                    }
+                  }
+                }
+              }
+            },
+            "Optional_Watchlist": {
+              "type": "If",
+              "expression": "[format('@not(empty(''{0}''))', replace(parameters('watchlistAlias'), '''', ''''''))]",
+              "runAfter": {
+                "Build_STAT_Base": [
+                  "Succeeded"
+                ]
+              },
+              "actions": {
+                "Run_Watchlist": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "[format('{0}/stat_watchlist', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                    "headers": {
+                      "Content-Type": "application/json"
+                    },
+                    "body": {
+                      "workspaceId": "[parameters('sentinelWorkspaceId')]",
+                      "base": "@body('Build_STAT_Base')",
+                      "watchlistAlias": "[parameters('watchlistAlias')]",
+                      "watchlistKey": "[parameters('watchlistKey')]",
+                      "watchlistKeyDataType": "[parameters('watchlistKeyDataType')]"
+                    },
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://management.azure.com/"
+                    }
+                  }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Watchlist_Skipped": {
+                    "type": "Compose",
+                    "inputs": {
+                      "ModuleName": "WatchlistModule",
+                      "WatchlistMatchCount": 0,
+                      "EntitiesOnWatchlistCount": 0
+                    }
+                  }
+                }
+              }
+            },
+            "Score_STAT": {
+              "type": "Http",
+              "runAfter": {
+                "AAD_Risks": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "Threat_Intelligence": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "MDE": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "UEBA": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "File_Insights": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "Defender_for_Cloud_Apps": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "Optional_KQL": [
+                  "Succeeded",
+                  "Failed"
+                ],
+                "Optional_Watchlist": [
+                  "Succeeded",
+                  "Failed"
+                ]
+              },
+              "inputs": {
+                "method": "POST",
+                "uri": "[format('{0}/stat_scoring', format('https://{0}/api', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName))]",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "inputs": [
+                    {
+                      "module": "@body('AAD_Risks')"
+                    },
+                    {
+                      "module": "@body('Threat_Intelligence')"
+                    },
+                    {
+                      "module": "@body('MDE')"
+                    },
+                    {
+                      "module": "@body('UEBA')"
+                    },
+                    {
+                      "module": "@body('File_Insights')"
+                    },
+                    {
+                      "module": "@body('Defender_for_Cloud_Apps')"
+                    }
+                  ]
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "Determine_STAT_Severity": {
+              "type": "Compose",
+              "runAfter": {
+                "Score_STAT": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": "[format('@{{if(greaterOrEquals(body(''Score_STAT'')?[''TotalScore''], {0}), ''High'', if(greaterOrEquals(body(''Score_STAT'')?[''TotalScore''], {1}), ''Medium'', if(greaterOrEquals(body(''Score_STAT'')?[''TotalScore''], {2}), ''Low'', ''Informational'')))}}', parameters('highScoreThreshold'), parameters('mediumScoreThreshold'), parameters('lowScoreThreshold'))]"
+            },
+            "Add_STAT_comment": {
               "type": "ApiConnection",
               "runAfter": {
-                "Get_STAT_Next_incident_context": [
+                "Determine_STAT_Severity": [
                   "Succeeded"
                 ]
               },
               "inputs": {
                 "body": {
                   "incidentArmId": "@triggerBody()?['object']?['id']",
-                  "message": "@{concat('STAT Next triage completed. Correlation ID: ', body('Get_STAT_Next_incident_context')?['correlationId'])}"
+                  "message": "@{concat('STAT Next full triage completed. Score: ', string(body('Score_STAT')?['TotalScore']), '. STAT severity: ', outputs('Determine_STAT_Severity'), '. TI matches: ', string(body('Threat_Intelligence')?['MatchedTIItemCount']), '. UEBA anomalies: ', string(body('UEBA')?['AnomalyCount']), '. File threats: ', string(body('File_Insights')?['HashesLinkedToThreatCount']), '.')}"
                 },
                 "host": {
                   "connection": {
