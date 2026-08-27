@@ -1,0 +1,36 @@
+name: Validate STAT Next
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'infrastructure/**'
+      - 'tests/**'
+      - 'host.json'
+      - '.github/workflows/validate.yml'
+  push:
+    branches: [stat-next]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r src/requirements.txt pytest
+      - run: pytest -q
+      - run: python -m compileall -q src
+
+  bicep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Azure CLI Bicep
+        run: az bicep install
+      - name: Compile infrastructure
+        run: az bicep build --file infrastructure/main.bicep
