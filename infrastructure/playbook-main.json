@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "12850801835009073025"
+      "templateHash": "4001581297347143790"
     }
   },
   "parameters": {
@@ -72,7 +72,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "1103869401703011197"
+              "templateHash": "8871193350344679372"
             }
           },
           "parameters": {
@@ -86,26 +86,7 @@
               "type": "string"
             }
           },
-          "variables": {
-            "sentinelConnectionName": "[format('{0}-sentinel', parameters('name'))]",
-            "sentinelManagedApiId": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]"
-          },
           "resources": [
-            {
-              "type": "Microsoft.Web/connections",
-              "apiVersion": "2016-06-01",
-              "name": "[variables('sentinelConnectionName')]",
-              "location": "[parameters('location')]",
-              "kind": "V1",
-              "properties": {
-                "displayName": "[variables('sentinelConnectionName')]",
-                "customParameterValues": {},
-                "parameterValueType": "Alternative",
-                "api": {
-                  "id": "[variables('sentinelManagedApiId')]"
-                }
-              }
-            },
             {
               "type": "Microsoft.Logic/workflows",
               "apiVersion": "2019-05-01",
@@ -120,96 +101,45 @@
                   "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
                   "contentVersion": "1.0.0.0",
                   "parameters": {
-                    "$connections": {
-                      "type": "Object",
-                      "defaultValue": {}
-                    },
                     "ProjectName": {
                       "type": "String",
                       "defaultValue": "STATNext"
                     },
                     "PlaybookVersion": {
                       "type": "String",
-                      "defaultValue": "1.0.1"
+                      "defaultValue": "1.1.0-bootstrap"
+                    },
+                    "FunctionAppName": {
+                      "type": "String",
+                      "defaultValue": "[parameters('functionAppName')]"
                     }
                   },
                   "triggers": {
-                    "When_Microsoft_Sentinel_incident_was_created": {
-                      "type": "ApiConnectionWebhook",
+                    "manual": {
+                      "type": "Request",
+                      "kind": "Http",
                       "inputs": {
-                        "body": {
-                          "callback_url": "@{listCallbackUrl()}"
-                        },
-                        "host": {
-                          "connection": {
-                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                          }
-                        },
-                        "path": "/incident-creation"
+                        "schema": {
+                          "type": "object",
+                          "properties": {}
+                        }
                       }
                     }
                   },
                   "actions": {
-                    "Get_STAT_Next_incident_context": {
-                      "type": "Function",
-                      "runAfter": {},
+                    "Bootstrap_ready": {
+                      "type": "Compose",
                       "inputs": {
-                        "body": {
-                          "subscriptionId": "@{triggerBody()?['object']?['id']?[1]}",
-                          "resourceGroup": "@{triggerBody()?['workspaceInfo']?['ResourceGroupName']}",
-                          "workspaceName": "@{triggerBody()?['workspaceInfo']?['WorkspaceName']}",
-                          "incidentId": "@{last(split(triggerBody()?['object']?['id'], '/'))}"
-                        },
-                        "function": {
-                          "id": "[resourceId('Microsoft.Web/sites/functions', parameters('functionAppName'), 'incident_context')]"
-                        },
-                        "method": "POST"
-                      }
-                    },
-                    "Add_STAT_Next_comment_to_incident": {
-                      "type": "ApiConnection",
-                      "runAfter": {
-                        "Get_STAT_Next_incident_context": [
-                          "Succeeded"
-                        ]
+                        "status": "STAT Next Sentinel playbook identity created. Sentinel connector activation is the next stage.",
+                        "functionAppName": "[parameters('functionAppName')]"
                       },
-                      "inputs": {
-                        "body": {
-                          "incidentArmId": "@triggerBody()?['object']?['id']",
-                          "message": "@{concat('STAT Next triage completed. Correlation ID: ', body('Get_STAT_Next_incident_context')?['correlationId'])}"
-                        },
-                        "host": {
-                          "connection": {
-                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                          }
-                        },
-                        "method": "post",
-                        "path": "/Incidents/Comment"
-                      }
+                      "runAfter": {}
                     }
                   },
                   "outputs": {}
                 },
-                "parameters": {
-                  "$connections": {
-                    "value": {
-                      "azuresentinel": {
-                        "connectionId": "[resourceId('Microsoft.Web/connections', variables('sentinelConnectionName'))]",
-                        "connectionName": "[variables('sentinelConnectionName')]",
-                        "id": "[variables('sentinelManagedApiId')]",
-                        "connectionProperties": {
-                          "authentication": {
-                            "type": "ManagedServiceIdentity"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Web/connections', variables('sentinelConnectionName'))]"
-              ]
+                "parameters": {}
+              }
             }
           ],
           "outputs": {
