@@ -35,28 +35,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Azure CLI Bicep
-        run: az bicep install
-      - name: Compile infrastructure
-        run: az bicep build --file infrastructure/main.bicep --outfile /tmp/main.json
-      - name: Validate compiled ARM JSON
-        run: python -m json.tool /tmp/main.json >/dev/null
+      - run: az bicep install
+      - run: az bicep build --file infrastructure/main.bicep --outfile /tmp/main.json
+      - run: python -m json.tool /tmp/main.json >/dev/null
 
   package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build deterministic deployment ZIP
+      - name: Build and validate deployment ZIP
         run: |
           mkdir -p artifacts
           zip -X -r artifacts/stat-next.zip function_app.py host.json requirements.txt modules -x '*/__pycache__/*' '*.pyc'
-      - name: Validate ZIP root layout
-        run: |
-          unzip -l artifacts/stat-next.zip
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'function_app.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'host.json'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'requirements.txt'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/sentinel.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/related_alerts.py'
-      - name: Package checksum
-        run: sha256sum artifacts/stat-next.zip
+          sha256sum artifacts/stat-next.zip
+
+  publish-portal-artifacts:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/stat-next' && !contains(github.event.head_commit.message, '[skip ci]')
+    needs: [python, bicep, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stat-next
+      - name: Build stable Portal artifacts
+        run: |
+          az bicep install
+          az bicep build --file infrastructure/main.bicep --outfile infrastructure/main.json
+          mkdir -p artifacts
+          zip -X -r artifacts/stat-next.zip function_app.py host.json requirements.txt modules -x '*/__pycache__/*' '*.pyc'
+          sha256sum artifacts/stat-next.zip | tee artifacts/stat-next.zip.sha256
+      - name: Publish artifacts to stat-next branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add infrastructure/main.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
+          git push origin HEAD:stat-next
