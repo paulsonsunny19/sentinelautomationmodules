@@ -52,13 +52,22 @@ jobs:
           p='infrastructure/playbook-activate.json'
           d=json.load(open(p))
           assert d.get('$schema','').endswith('/deploymentTemplate.json#')
+          assert 'tenantId' in d.get('parameters', {})
           resources=d.get('resources',[])
           wf=next(r for r in resources if r.get('type')=='Microsoft.Logic/workflows')
-          actions=wf['properties']['definition']['actions']
+          definition=wf['properties']['definition']
+          actions=definition['actions']
           required={'Get_incident_context','Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','High_Risk'}
           missing=required-set(actions)
           assert not missing, f'Missing STAT actions: {sorted(missing)}'
           assert wf.get('identity',{}).get('type')=='SystemAssigned'
+          trigger=definition['triggers']['When_Microsoft_Sentinel_incident_was_created']
+          assert trigger['type']=='ApiConnectionWebhook'
+          assert trigger['inputs']['host']['connection']['referenceName']=='azuresentinel'
+          assert trigger['inputs']['body']['callback_url']=='@listCallbackUrl()'
+          assert trigger['inputs']['path']=='/incident-creation'
+          base_body=actions['Build_STAT_Base']['inputs']['body']
+          assert base_body['tenantId']=="[parameters('tenantId')]"
           print('Native STAT activation ARM template is structurally valid')
           PY
 
@@ -89,7 +98,7 @@ jobs:
           sha256sum artifacts/stat-next.zip
 
   publish-portal-artifacts:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'stat-next'
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'stat-next')
     needs: [python, infrastructure, package]
     concurrency:
       group: stat-next-portal-artifacts
