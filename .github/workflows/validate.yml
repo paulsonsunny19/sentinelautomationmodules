@@ -57,18 +57,20 @@ jobs:
           wf=next(r for r in resources if r.get('type')=='Microsoft.Logic/workflows')
           definition=wf['properties']['definition']
           actions=definition['actions']
-          required={'Get_incident_context','Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','High_Risk'}
+          required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','High_Risk'}
           missing=required-set(actions)
           assert not missing, f'Missing STAT actions: {sorted(missing)}'
           assert wf.get('identity',{}).get('type')=='SystemAssigned'
-          trigger=definition['triggers']['When_Microsoft_Sentinel_incident_was_created']
+          trigger=definition['triggers']['Microsoft_Sentinel_incident']
           assert trigger['type']=='ApiConnectionWebhook'
-          assert trigger['inputs']['host']['connection']['referenceName']=='azuresentinel'
-          assert trigger['inputs']['body']['callback_url']=='@listCallbackUrl()'
+          assert trigger['inputs']['host']['connection']['name']=="@parameters('$connections')['azuresentinel']['connectionId']"
+          assert trigger['inputs']['body']['callback_url']=='@{listCallbackUrl()}'
           assert trigger['inputs']['path']=='/incident-creation'
           base_body=actions['Build_STAT_Base']['inputs']['body']
           assert base_body['tenantId']=="[parameters('tenantId')]"
-          print('Native STAT activation ARM template is structurally valid')
+          assert base_body['entities']=="@triggerBody()?['object']?['properties']?['relatedEntities']"
+          assert actions['Build_STAT_Base']['runAfter']=={}
+          print('Native Microsoft Sentinel incident trigger and entity contract are structurally valid')
           PY
 
   package:
