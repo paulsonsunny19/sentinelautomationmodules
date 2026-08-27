@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "1949401672626465967"
+      "templateHash": "15108209146732162138"
     }
   },
   "parameters": {
@@ -53,6 +53,7 @@
     "planName": "[format('{0}-plan', parameters('namePrefix'))]",
     "functionName": "[format('{0}-api', parameters('namePrefix'))]",
     "insightsName": "[format('{0}-appi', parameters('namePrefix'))]",
+    "playbookName": "[format('{0}-incident-triage', parameters('namePrefix'))]",
     "workbookName": "[guid(resourceGroup().id, parameters('namePrefix'), 'status-workbook')]",
     "packageContainerName": "statnext-package",
     "packageBlobName": "stat-next.zip",
@@ -314,6 +315,193 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "statNextIncidentPlaybook",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[variables('playbookName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "functionAppName": {
+            "value": "[variables('functionName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "16704787601086461053"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "functionAppName": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "sentinelConnectionName": "[format('{0}-sentinel', parameters('name'))]",
+            "sentinelManagedApiId": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/connections",
+              "apiVersion": "2016-06-01",
+              "name": "[variables('sentinelConnectionName')]",
+              "location": "[parameters('location')]",
+              "kind": "V1",
+              "properties": {
+                "displayName": "[variables('sentinelConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueType": "Alternative",
+                "api": {
+                  "id": "[variables('sentinelManagedApiId')]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Logic/workflows",
+              "apiVersion": "2019-05-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "state": "Enabled",
+                "definition": {
+                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "$connections": {
+                      "type": "Object",
+                      "defaultValue": {}
+                    },
+                    "ProjectName": {
+                      "type": "String",
+                      "defaultValue": "STATNext"
+                    },
+                    "PlaybookVersion": {
+                      "type": "String",
+                      "defaultValue": "1.0.0"
+                    }
+                  },
+                  "triggers": {
+                    "When_Microsoft_Sentinel_incident_was_created": {
+                      "type": "ApiConnectionWebhook",
+                      "inputs": {
+                        "body": {
+                          "callback_url": "@{listCallbackUrl()}"
+                        },
+                        "host": {
+                          "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                          }
+                        },
+                        "path": "/incident-creation"
+                      }
+                    }
+                  },
+                  "actions": {
+                    "Get_STAT_Next_incident_context": {
+                      "type": "Function",
+                      "runAfter": {},
+                      "inputs": {
+                        "body": {
+                          "subscriptionId": "@{triggerBody()?['object']?['id']?[1]}",
+                          "resourceGroup": "@{triggerBody()?['workspaceInfo']?['ResourceGroupName']}",
+                          "workspaceName": "@{triggerBody()?['workspaceInfo']?['WorkspaceName']}",
+                          "incidentId": "@{last(split(triggerBody()?['object']?['id'], '/'))}"
+                        },
+                        "function": {
+                          "id": "[resourceId('Microsoft.Web/sites/functions', parameters('functionAppName'), 'incident_context')]"
+                        },
+                        "method": "POST"
+                      }
+                    },
+                    "Add_STAT_Next_comment_to_incident": {
+                      "type": "ApiConnection",
+                      "runAfter": {
+                        "Get_STAT_Next_incident_context": [
+                          "Succeeded"
+                        ]
+                      },
+                      "inputs": {
+                        "body": {
+                          "incidentArmId": "@triggerBody()?['object']?['id']",
+                          "message": "@{concat('STAT Next triage completed. Correlation ID: ', body('Get_STAT_Next_incident_context')?['correlationId'])}"
+                        },
+                        "host": {
+                          "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                          }
+                        },
+                        "method": "post",
+                        "path": "/Incidents/Comment"
+                      }
+                    }
+                  },
+                  "outputs": {}
+                },
+                "parameters": {
+                  "$connections": {
+                    "value": {
+                      "azuresentinel": {
+                        "connectionId": "[resourceId('Microsoft.Web/connections', variables('sentinelConnectionName'))]",
+                        "connectionName": "[variables('sentinelConnectionName')]",
+                        "id": "[variables('sentinelManagedApiId')]",
+                        "connectionProperties": {
+                          "authentication": {
+                            "type": "ManagedServiceIdentity"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('sentinelConnectionName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('name')), '2019-05-01', 'full').identity.principalId]"
+            },
+            "resourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Logic/workflows', parameters('name'))]"
+            },
+            "playbookName": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "statNextWorkspaceRbac",
       "subscriptionId": "[parameters('sentinelSubscriptionId')]",
       "resourceGroup": "[parameters('sentinelResourceGroup')]",
@@ -328,6 +516,9 @@
           },
           "functionPrincipalId": {
             "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+          },
+          "playbookPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.principalId.value]"
           }
         },
         "template": {
@@ -337,7 +528,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "16100585116596887623"
+              "templateHash": "3710975243865883458"
             }
           },
           "parameters": {
@@ -346,11 +537,16 @@
             },
             "functionPrincipalId": {
               "type": "string"
+            },
+            "playbookPrincipalId": {
+              "type": "string",
+              "defaultValue": ""
             }
           },
           "variables": {
             "logAnalyticsReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]",
-            "sentinelReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8d289c81-5878-46d4-8554-54e1e3d8b5cb')]"
+            "sentinelReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8d289c81-5878-46d4-8554-54e1e3d8b5cb')]",
+            "sentinelResponderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3e150937-b8fe-4cfb-8069-0eaf05ecd056')]"
           },
           "resources": [
             {
@@ -374,12 +570,25 @@
                 "principalId": "[parameters('functionPrincipalId')]",
                 "principalType": "ServicePrincipal"
               }
+            },
+            {
+              "condition": "[not(empty(parameters('playbookPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('playbookPrincipalId'), 'sentinel-responder')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelResponderRole')]",
+                "principalId": "[parameters('playbookPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
             }
           ]
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook')]"
       ]
     }
   ],
@@ -403,6 +612,14 @@
     "workbookName": {
       "type": "string",
       "value": "[variables('workbookName')]"
+    },
+    "playbookName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.playbookName.value]"
+    },
+    "playbookPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.principalId.value]"
     }
   }
 }
