@@ -4,6 +4,7 @@ import uuid
 import azure.functions as func
 from modules.base import normalize
 from modules.scoring import calculate
+from modules.comment import build_comment
 from modules.related_alerts import RelatedAlertsRequest, query_related_alerts
 from modules.sentinel import safe_incident_context
 from modules.threat_intel import ThreatIntelRequest, query_threat_intel
@@ -33,12 +34,24 @@ def execute(req,name,required,handler):
     except Exception:
         logging.exception('%s failed correlationId=%s',name,cid); return response({'error':name+'_failure','correlationId':cid},502)
 
+def _trigger_entities(body):
+    trigger=body.get('Body') if isinstance(body.get('Body'),dict) else {}
+    obj=trigger.get('object') if isinstance(trigger.get('object'),dict) else {}
+    props=obj.get('properties') if isinstance(obj.get('properties'),dict) else {}
+    entities=props.get('relatedEntities')
+    return entities if isinstance(entities,list) else (body.get('entities') if isinstance(body.get('entities'),list) else [])
+
+def _incident_id(body):
+    trigger=body.get('Body') if isinstance(body.get('Body'),dict) else {}
+    obj=trigger.get('object') if isinstance(trigger.get('object'),dict) else {}
+    return body.get('incidentArmId') or obj.get('id')
+
 @app.route(route='health',methods=['GET'])
-def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','ScoringModule'],'correlationId':str(uuid.uuid4())})
+def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
-def stat_base(req):return execute(req,'stat_base',('incidentArmId','workspaceId'),lambda b:normalize(b.get('entities') or [],b['incidentArmId'],b['workspaceId'],b.get('tenantId'),b.get('tenantDisplayName')))
+def stat_base(req):return execute(req,'stat_base',('workspaceId',),lambda b:normalize(_trigger_entities(b),_incident_id(b) or '',b['workspaceId'],b.get('tenantId'),b.get('tenantDisplayName')))
 @app.route(route='stat_aad_risks',methods=['POST'])
 def stat_aad_risks(req):return execute(req,'stat_aad_risks',('workspaceId','base'),lambda b:query_aad_risks(AADRisksRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),bool(b.get('mfaFailureLookup',True)),bool(b.get('mfaFraudLookup',True)))))
 @app.route(route='stat_related_alerts',methods=['POST'])
@@ -59,3 +72,5 @@ def stat_file(req):return execute(req,'stat_file',('base',),lambda b:query_file_
 def stat_mcas(req):return execute(req,'stat_mcas',('base',),lambda b:query_mcas(MCASRequest(b['base'],int(b.get('scoreThreshold',0)),b.get('portalUrl'))))
 @app.route(route='stat_scoring',methods=['POST'])
 def stat_scoring(req):return execute(req,'stat_scoring',('inputs',),lambda b:calculate(b['inputs']) if isinstance(b['inputs'],list) else (_ for _ in ()).throw(ValueError('inputs must be an array')))
+@app.route(route='stat_comment',methods=['POST'])
+def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas')))
