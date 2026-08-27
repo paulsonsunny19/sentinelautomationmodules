@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15108209146732162138"
+      "templateHash": "5211630139327058969"
     }
   },
   "parameters": {
@@ -339,7 +339,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "16704787601086461053"
+              "templateHash": "1103869401703011197"
             }
           },
           "parameters": {
@@ -382,7 +382,7 @@
                 "type": "SystemAssigned"
               },
               "properties": {
-                "state": "Enabled",
+                "state": "Disabled",
                 "definition": {
                   "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
                   "contentVersion": "1.0.0.0",
@@ -397,7 +397,7 @@
                     },
                     "PlaybookVersion": {
                       "type": "String",
-                      "defaultValue": "1.0.0"
+                      "defaultValue": "1.0.1"
                     }
                   },
                   "triggers": {
@@ -491,6 +491,10 @@
             "playbookName": {
               "type": "string",
               "value": "[parameters('name')]"
+            },
+            "bootstrapState": {
+              "type": "string",
+              "value": "Disabled"
             }
           }
         }
