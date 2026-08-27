@@ -1,0 +1,6 @@
+Storage Account
+  -> STATFunctionSystemId nested deployment
+      -> Microsoft.Web/sites (STAT Function)
+          -> LogicAppConnector nested deployment
+              -> STAT v2 custom connector
+              -> optional sample
