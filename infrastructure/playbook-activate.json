@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "2.2.0.0",
+  "contentVersion": "2.2.1.0",
   "parameters": {
     "namePrefix": { "type": "string", "minLength": 5 },
     "location": { "type": "string", "defaultValue": "[resourceGroup().location]" },
@@ -16,7 +16,7 @@
     "functionName": "[concat(parameters('namePrefix'), '-api')]",
     "playbookName": "[concat(parameters('namePrefix'), '-incident-triage')]",
     "connectionName": "[concat(variables('playbookName'), '-sentinel')]",
-    "functionBaseUri": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01').defaultHostName, '/api')]",
+    "functionBaseUri": "[concat('https://', variables('functionName'), '.azurewebsites.net/api')]",
     "sentinelApiId": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]"
   },
   "resources": [
@@ -30,8 +30,8 @@
       "properties": {
         "state": "Enabled",
         "definition": {
-          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#", "contentVersion": "2.2.0.0",
-          "parameters": { "$connections": { "type": "Object", "defaultValue": {} }, "ProjectName": { "type": "String", "defaultValue": "STATNext" }, "PlaybookVersion": { "type": "String", "defaultValue": "2.2.0-full" } },
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#", "contentVersion": "2.2.1.0",
+          "parameters": { "$connections": { "type": "Object", "defaultValue": {} }, "ProjectName": { "type": "String", "defaultValue": "STATNext" }, "PlaybookVersion": { "type": "String", "defaultValue": "2.2.1-full" } },
           "triggers": { "When_Microsoft_Sentinel_incident_was_created": { "type": "ApiConnectionWebhook", "inputs": { "body": { "callback_url": "@{listCallbackUrl()}" }, "host": { "connection": { "name": "@parameters('$connections')['azuresentinel']['connectionId']" } }, "path": "/incident-creation" } } },
           "actions": {
             "Get_incident_context": { "type": "Http", "runAfter": {}, "inputs": { "method": "POST", "uri": "[concat(variables('functionBaseUri'), '/incident_context')]", "body": { "subscriptionId": "[parameters('sentinelSubscriptionId')]", "resourceGroup": "[parameters('sentinelResourceGroup')]", "workspaceName": "[parameters('sentinelWorkspaceName')]", "incidentId": "@{last(split(triggerBody()?['object']?['id'], '/'))}" }, "authentication": { "type": "ManagedServiceIdentity", "audience": "https://management.azure.com/" } } },
