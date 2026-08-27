@@ -24,7 +24,9 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
     return response({"service":"STAT Next","status":"healthy","correlationId":str(uuid.uuid4())})
 
 
-@app.route(route="v1/sentinel/incident-context", methods=["POST"])
+# Keep the function route equal to the function name. The Logic Apps Azure
+# Functions action rejects functions that expose a custom HTTP route.
+@app.route(route="incident_context", methods=["POST"])
 def incident_context(req: func.HttpRequest) -> func.HttpResponse:
     correlation_id = str(uuid.uuid4())
     body, error = body_json(req, correlation_id)
