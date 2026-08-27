@@ -49,17 +49,13 @@ jobs:
           python -m json.tool infrastructure/playbook-activate.json >/dev/null
           python - <<'PY'
           import json
-          p='infrastructure/playbook-activate.json'
-          d=json.load(open(p))
+          d=json.load(open('infrastructure/playbook-activate.json'))
           assert d.get('$schema','').endswith('/deploymentTemplate.json#')
           assert 'tenantId' in d.get('parameters', {})
-          resources=d.get('resources',[])
-          wf=next(r for r in resources if r.get('type')=='Microsoft.Logic/workflows')
-          definition=wf['properties']['definition']
-          actions=definition['actions']
-          required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','High_Risk'}
-          missing=required-set(actions)
-          assert not missing, f'Missing STAT actions: {sorted(missing)}'
+          wf=next(r for r in d.get('resources',[]) if r.get('type')=='Microsoft.Logic/workflows')
+          definition=wf['properties']['definition']; actions=definition['actions']
+          required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','Build_STAT_Comment','High_Risk'}
+          missing=required-set(actions); assert not missing, f'Missing STAT actions: {sorted(missing)}'
           assert wf.get('identity',{}).get('type')=='SystemAssigned'
           trigger=definition['triggers']['Microsoft_Sentinel_incident']
           assert trigger['type']=='ApiConnectionWebhook'
@@ -68,9 +64,14 @@ jobs:
           assert trigger['inputs']['path']=='/incident-creation'
           base_body=actions['Build_STAT_Base']['inputs']['body']
           assert base_body['tenantId']=="[parameters('tenantId')]"
-          assert base_body['entities']=="@triggerBody()?['object']?['properties']?['relatedEntities']"
+          assert base_body['Body']=='@triggerBody()'
+          assert 'entities' not in base_body
           assert actions['Build_STAT_Base']['runAfter']=={}
-          print('Native Microsoft Sentinel incident trigger and entity contract are structurally valid')
+          assert actions['Build_STAT_Comment']['inputs']['uri'].endswith("/stat_comment')]")
+          assert actions['High_Risk']['runAfter']=={'Build_STAT_Comment':['Succeeded']}
+          high=actions['High_Risk']['actions']; low=actions['High_Risk']['else']['actions']
+          assert 'Add_STAT_High_Risk_Comment' in high and 'Add_STAT_Low_Risk_Comment' in low
+          print('Native Sentinel full-trigger and rich-comment contract is structurally valid')
           PY
 
   package:
@@ -95,6 +96,7 @@ jobs:
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'host.json'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'requirements.txt'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/sentinel.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/comment.py'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/functions/'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/identity/'
           sha256sum artifacts/stat-next.zip
@@ -122,16 +124,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           az bicep install
-
           for attempt in 1 2 3; do
             git fetch origin stat-next
             git reset --hard origin/stat-next
             git clean -fdx
-
             az bicep build --file infrastructure/main.bicep --outfile infrastructure/main.json
             az bicep build --file infrastructure/playbook-main.bicep --outfile infrastructure/playbook-main.json
             python -m json.tool infrastructure/playbook-activate.json >/dev/null
-
             mkdir -p .python_packages/lib/site-packages package-root/modules artifacts
             pip install --disable-pip-version-check --no-compile -r requirements.txt --target .python_packages/lib/site-packages
             cp function_app.py host.json requirements.txt package-root/
@@ -139,7 +138,6 @@ jobs:
             cp -R .python_packages package-root/
             (cd package-root && zip -X -r ../artifacts/stat-next.zip . -x '*/__pycache__/*' '*.pyc')
             sha256sum artifacts/stat-next.zip | tee artifacts/stat-next.zip.sha256
-
             git add infrastructure/main.json infrastructure/playbook-main.json infrastructure/playbook-activate.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
             if git diff --cached --quiet; then exit 0; fi
             git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
@@ -147,6 +145,5 @@ jobs:
             echo "Remote changed during publish attempt $attempt; rebuilding from latest tip."
             sleep $((attempt * 2))
           done
-
           echo 'Failed to publish artifacts after 3 clean rebuild attempts.' >&2
           exit 1
