@@ -4,6 +4,12 @@ targetScope = 'resourceGroup'
 @minLength(5)
 param namePrefix string
 param location string = resourceGroup().location
+@description('Subscription containing the Microsoft Sentinel workspace.')
+param sentinelSubscriptionId string = subscription().subscriptionId
+@description('Resource group containing the Microsoft Sentinel workspace.')
+param sentinelResourceGroup string
+@description('Log Analytics workspace used by Microsoft Sentinel.')
+param sentinelWorkspaceName string
 
 var functionName = '${namePrefix}-api'
 var playbookName = '${namePrefix}-incident-triage'
@@ -55,7 +61,7 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
         }
         PlaybookVersion: {
           type: 'String'
-          defaultValue: '1.1.1'
+          defaultValue: '1.1.2'
         }
       }
       triggers: {
@@ -85,9 +91,9 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
               'Content-Type': 'application/json'
             }
             body: {
-              subscriptionId: '@{split(triggerBody()?[\'object\']?[\'id\'], \'/\')[2]}'
-              resourceGroup: '@{triggerBody()?[\'workspaceInfo\']?[\'ResourceGroupName\']}'
-              workspaceName: '@{triggerBody()?[\'workspaceInfo\']?[\'WorkspaceName\']}'
+              subscriptionId: sentinelSubscriptionId
+              resourceGroup: sentinelResourceGroup
+              workspaceName: sentinelWorkspaceName
               incidentId: '@{last(split(triggerBody()?[\'object\']?[\'id\'], \'/\'))}'
             }
             authentication: {
@@ -146,3 +152,4 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
 output playbookName string = activatedPlaybook.name
 output playbookState string = 'Enabled'
 output sentinelConnectionName string = sentinelConnection.name
+output sentinelWorkspace string = sentinelWorkspaceName
