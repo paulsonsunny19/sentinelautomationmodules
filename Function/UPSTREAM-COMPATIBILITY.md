@@ -1,0 +1,1 @@
+The local `SystemIdentity.json` is based on upstream `Function/SystemIdentity.json` and preserves its Function App settings, Azure Files content settings, Python 3.12 runtime, System Assigned identity, and nested `LogicAppConnector` dependency. Package delivery remains parameterized, with the deployment requiring a non-redirecting Azure Blob URL.
