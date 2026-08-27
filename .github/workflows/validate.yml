@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'modules/**'
+      - 'function_app.py'
+      - 'requirements.txt'
       - 'infrastructure/**'
       - 'tests/**'
       - 'host.json'
@@ -26,7 +29,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r src/requirements.txt pytest
       - run: pytest -q
-      - run: python -m compileall -q src
+      - run: python -m compileall -q src function_app.py modules
 
   bicep:
     runs-on: ubuntu-latest
@@ -35,4 +38,25 @@ jobs:
       - name: Install Azure CLI Bicep
         run: az bicep install
       - name: Compile infrastructure
-        run: az bicep build --file infrastructure/main.bicep
+        run: az bicep build --file infrastructure/main.bicep --outfile /tmp/main.json
+      - name: Validate compiled ARM JSON
+        run: python -m json.tool /tmp/main.json >/dev/null
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build deterministic deployment ZIP
+        run: |
+          mkdir -p artifacts
+          zip -X -r artifacts/stat-next.zip function_app.py host.json requirements.txt modules -x '*/__pycache__/*' '*.pyc'
+      - name: Validate ZIP root layout
+        run: |
+          unzip -l artifacts/stat-next.zip
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'function_app.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'host.json'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'requirements.txt'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/sentinel.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/related_alerts.py'
+      - name: Package checksum
+        run: sha256sum artifacts/stat-next.zip
