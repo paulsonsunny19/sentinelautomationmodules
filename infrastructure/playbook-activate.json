@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7520091685681300198"
+      "templateHash": "979592399242551024"
     }
   },
   "parameters": {
@@ -19,6 +19,25 @@
     "location": {
       "type": "string",
       "defaultValue": "[resourceGroup().location]"
+    },
+    "sentinelSubscriptionId": {
+      "type": "string",
+      "defaultValue": "[subscription().subscriptionId]",
+      "metadata": {
+        "description": "Subscription containing the Microsoft Sentinel workspace."
+      }
+    },
+    "sentinelResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group containing the Microsoft Sentinel workspace."
+      }
+    },
+    "sentinelWorkspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Log Analytics workspace used by Microsoft Sentinel."
+      }
     }
   },
   "variables": {
@@ -67,7 +86,7 @@
             },
             "PlaybookVersion": {
               "type": "String",
-              "defaultValue": "1.1.1"
+              "defaultValue": "1.1.2"
             }
           },
           "triggers": {
@@ -97,9 +116,9 @@
                   "Content-Type": "application/json"
                 },
                 "body": {
-                  "subscriptionId": "@{split(triggerBody()?['object']?['id'], '/')[2]}",
-                  "resourceGroup": "@{triggerBody()?['workspaceInfo']?['ResourceGroupName']}",
-                  "workspaceName": "@{triggerBody()?['workspaceInfo']?['WorkspaceName']}",
+                  "subscriptionId": "[parameters('sentinelSubscriptionId')]",
+                  "resourceGroup": "[parameters('sentinelResourceGroup')]",
+                  "workspaceName": "[parameters('sentinelWorkspaceName')]",
                   "incidentId": "@{last(split(triggerBody()?['object']?['id'], '/'))}"
                 },
                 "authentication": {
@@ -166,6 +185,10 @@
     "sentinelConnectionName": {
       "type": "string",
       "value": "[variables('sentinelConnectionName')]"
+    },
+    "sentinelWorkspace": {
+      "type": "string",
+      "value": "[parameters('sentinelWorkspaceName')]"
     }
   }
 }
