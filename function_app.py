@@ -15,7 +15,10 @@ from modules.ueba import UEBARequest, query_ueba
 from modules.file_insights import FileInsightsRequest, query_file_insights
 from modules.mcas import MCASRequest, query_mcas
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+# HTTP authorization is enforced by App Service Authentication (Easy Auth).
+# Anonymous here means the Functions runtime does not additionally require a
+# function key after Easy Auth has validated the caller's Entra token.
+app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 def response(payload,status=200): return func.HttpResponse(json.dumps(payload,default=str),status_code=status,mimetype='application/json')
 def body_json(req,cid):
     try:return req.get_json(),None
