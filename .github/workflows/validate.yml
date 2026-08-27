@@ -75,6 +75,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: stat-next
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -97,4 +98,13 @@ jobs:
           git add infrastructure/main.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
           if git diff --cached --quiet; then exit 0; fi
           git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
-          git push origin HEAD:stat-next
+          for attempt in 1 2 3; do
+            git fetch origin stat-next
+            if git rebase origin/stat-next && git push origin HEAD:stat-next; then
+              exit 0
+            fi
+            git rebase --abort || true
+            sleep $((attempt * 2))
+          done
+          echo 'Failed to publish artifacts after 3 attempts.' >&2
+          exit 1
