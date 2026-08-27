@@ -1,0 +1,1 @@
+This branch is the current deployment candidate. It has not yet been promoted to main. Test it in Azure before merging. Do not use the older fix/linux-consumption-package branch for a new deployment.
