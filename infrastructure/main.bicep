@@ -12,6 +12,8 @@ param sentinelResourceGroup string
 param sentinelWorkspaceName string
 @description('Public source URL used only to stage the validated package into private Azure Blob Storage.')
 param packageUri string
+@description('Optional tenant-specific Defender for Cloud Apps API/portal URL from Defender portal > Settings > Cloud Apps > System > About. Leave empty to deploy MDCA in ConfigurationRequired mode.')
+param defenderCloudAppsApiUrl string = ''
 
 var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
@@ -79,7 +81,7 @@ module workspaceRbac 'workspace-rbac.bicep' = { name: 'statNextWorkspaceRbac', s
 resource appSettings 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: functionApp
   name: 'appsettings'
-  properties: { FUNCTIONS_EXTENSION_VERSION: '~4', FUNCTIONS_WORKER_RUNTIME: 'python', APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString, AzureWebJobsStorage__accountName: storage.name, AzureWebJobsStorage__credential: 'managedidentity', AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob, AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue, AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table, WEBSITE_RUN_FROM_PACKAGE: privatePackageUri, WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned' }
+  properties: union({ FUNCTIONS_EXTENSION_VERSION: '~4', FUNCTIONS_WORKER_RUNTIME: 'python', APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString, AzureWebJobsStorage__accountName: storage.name, AzureWebJobsStorage__credential: 'managedidentity', AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob, AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue, AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table, WEBSITE_RUN_FROM_PACKAGE: privatePackageUri, WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned' }, empty(defenderCloudAppsApiUrl) ? {} : { STAT_MCAS_PORTAL_URL: defenderCloudAppsApiUrl })
   dependsOn: [hostStorageRole, packageReaderRole, workspaceRbac]
 }
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'ftp', properties: { allow: false } }
@@ -91,4 +93,5 @@ output functionPrincipalId string = functionApp.identity.principalId
 output storageAccountName string = storage.name
 output packageBlobUri string = privatePackageUri
 output workbookName string = workbook.name
+output defenderCloudAppsConfigured bool = !empty(defenderCloudAppsApiUrl)
 output playbookDeployment string = 'Deploy infrastructure/playbook-main.json after the core deployment succeeds.'
