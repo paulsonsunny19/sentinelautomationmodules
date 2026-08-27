@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "4464187247160959622"
+      "templateHash": "9519012324670256373"
     }
   },
   "parameters": {
@@ -44,6 +44,13 @@
       "type": "string",
       "metadata": {
         "description": "Public source URL used only to stage the validated package into private Azure Blob Storage."
+      }
+    },
+    "defenderCloudAppsApiUrl": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional tenant-specific Defender for Cloud Apps API/portal URL from Defender portal > Settings > Cloud Apps > System > About. Leave empty to deploy MDCA in ConfigurationRequired mode."
       }
     }
   },
@@ -248,18 +255,7 @@
       "type": "Microsoft.Web/sites/config",
       "apiVersion": "2022-09-01",
       "name": "[format('{0}/{1}', variables('functionName'), 'appsettings')]",
-      "properties": {
-        "FUNCTIONS_EXTENSION_VERSION": "~4",
-        "FUNCTIONS_WORKER_RUNTIME": "python",
-        "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString]",
-        "AzureWebJobsStorage__accountName": "[variables('storageName')]",
-        "AzureWebJobsStorage__credential": "managedidentity",
-        "AzureWebJobsStorage__blobServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob]",
-        "AzureWebJobsStorage__queueServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue]",
-        "AzureWebJobsStorage__tableServiceUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table]",
-        "WEBSITE_RUN_FROM_PACKAGE": "[format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName'))]",
-        "WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID": "SystemAssigned"
-      },
+      "properties": "[union(createObject('FUNCTIONS_EXTENSION_VERSION', '~4', 'FUNCTIONS_WORKER_RUNTIME', 'python', 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString, 'AzureWebJobsStorage__accountName', variables('storageName'), 'AzureWebJobsStorage__credential', 'managedidentity', 'AzureWebJobsStorage__blobServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, 'AzureWebJobsStorage__queueServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue, 'AzureWebJobsStorage__tableServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table, 'WEBSITE_RUN_FROM_PACKAGE', format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName')), 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID', 'SystemAssigned'), if(empty(parameters('defenderCloudAppsApiUrl')), createObject(), createObject('STAT_MCAS_PORTAL_URL', parameters('defenderCloudAppsApiUrl'))))]",
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage'))]",
@@ -420,6 +416,10 @@
     "workbookName": {
       "type": "string",
       "value": "[variables('workbookName')]"
+    },
+    "defenderCloudAppsConfigured": {
+      "type": "bool",
+      "value": "[not(empty(parameters('defenderCloudAppsApiUrl')))]"
     },
     "playbookDeployment": {
       "type": "string",
