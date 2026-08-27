@@ -2,6 +2,11 @@ param name string
 param location string
 param functionAppName string
 
+// The Sentinel API connection and workflow are deliberately provisioned in a
+// bootstrap-safe state.  Creating an enabled ApiConnectionWebhook can cause
+// Azure Logic Apps to contact the connector host before the workflow's
+// system-assigned identity has received Sentinel RBAC.  Deploy disabled first;
+// after ARM creates the identity, workspace-rbac.bicep grants Sentinel access.
 var sentinelConnectionName = '${name}-sentinel'
 var sentinelManagedApiId = subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'azuresentinel')
 
@@ -26,7 +31,9 @@ resource playbook 'Microsoft.Logic/workflows@2019-05-01' = {
     type: 'SystemAssigned'
   }
   properties: {
-    state: 'Enabled'
+    // Keep disabled during ARM bootstrap. This prevents webhook registration
+    // from racing the managed-identity RBAC assignment in the parent template.
+    state: 'Disabled'
     definition: {
       '$schema': 'https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#'
       contentVersion: '1.0.0.0'
@@ -41,7 +48,7 @@ resource playbook 'Microsoft.Logic/workflows@2019-05-01' = {
         }
         PlaybookVersion: {
           type: 'String'
-          defaultValue: '1.0.0'
+          defaultValue: '1.0.1'
         }
       }
       triggers: {
@@ -122,3 +129,4 @@ resource playbook 'Microsoft.Logic/workflows@2019-05-01' = {
 output principalId string = playbook.identity.principalId
 output resourceId string = playbook.id
 output playbookName string = playbook.name
+output bootstrapState string = 'Disabled'
