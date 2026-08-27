@@ -1,0 +1,1 @@
+Use the direct Azure Blob SAS URL for the STAT function package. Do not use the GitHub release download address as the FunctionPackage value.
