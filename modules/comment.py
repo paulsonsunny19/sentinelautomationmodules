@@ -29,14 +29,18 @@ def _table(headers: list[str], rows: list[list[Any]]) -> str:
     return "\n".join([head,sep,*body])
 
 
+def _vertical_table(rows: list[tuple[str, Any]]) -> str:
+    return _table(["Field", "Value"], [[field, value] for field, value in rows])
+
+
 def _portal_user(upn: Any,user_id: Any) -> str | None:
     if not upn: return None
     if not user_id: return str(upn)
-    return f"[{upn}](https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{user_id})<br>(Contact User)"
+    return f'<a href="https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{user_id}" target="_blank">{upn}</a><br>(Contact User)'
 
 
 def _mailto(upn: Any) -> str | None:
-    return f"[{upn}](mailto:{upn})" if upn else None
+    return f'<a href="mailto:{upn}" target="_blank">{upn}</a>' if upn else None
 
 
 def build_comment(base: dict[str, Any], scoring: dict[str, Any], aad: dict[str, Any] | None = None,
@@ -47,34 +51,35 @@ def build_comment(base: dict[str, Any], scoring: dict[str, Any], aad: dict[str, 
     score=scoring.get("TotalScore",0)
     sections=[f"## STAT Next Triage\n\n**Risk Score:** {_v(score)}  \n**Entities Analyzed:** {_v(base.get('EntitiesCount',0))}"]
 
-    accounts=[]
+    account_sections=[]
     details=[x for x in aad.get("DetailedResults",[]) if isinstance(x,dict)]
     risk_by_upn={str(x.get("UserPrincipalName","")).lower():x for x in details}
     risk_by_id={str(x.get("UserId","")).lower():x for x in details if x.get("UserId")}
-    for item in base.get("Accounts",[]):
+    for index,item in enumerate(base.get("Accounts",[]),start=1):
         r=_raw(item); a=_additional(r)
         upn=_first(a.get("UserPrincipalName"),a.get("userPrincipalName"),r.get("userPrincipalName"),r.get("upn"),item.get("UserPrincipalName"))
         uid=_first(r.get("aadUserId"),r.get("objectGuid"),a.get("AadUserId"),a.get("aadUserId"))
         risk=risk_by_upn.get(str(upn or "").lower()) or risk_by_id.get(str(uid or "").lower()) or {}
-        accounts.append([
-            _portal_user(upn,uid),
-            _first(risk.get("City"),a.get("City"),a.get("city"),r.get("city")),
-            _first(risk.get("Country"),a.get("Country"),a.get("country"),r.get("country")),
-            _first(a.get("Department"),a.get("department"),r.get("department"),risk.get("Department")),
-            _first(a.get("JobTitle"),a.get("jobTitle"),r.get("jobTitle"),risk.get("JobTitle")),
-            _first(a.get("OfficeLocation"),a.get("officeLocation"),r.get("officeLocation"),risk.get("Office")),
-            risk.get("AADRoles"),
-            _mailto(risk.get("ManagerUPN")),
-            risk.get("MfaRegistered"),
-            risk.get("SSPREnabled"),
-            risk.get("SSPRRegistered"),
-            risk.get("UserRiskLevel"),
-            risk.get("UserFailedMFACount"),
-            risk.get("UserMFAFraudCount"),
-        ])
-    if accounts:
-        sections.append("### Account Info\n\n"+_table(
-            ["UserPrincipalName","City","Country","Department","JobTitle","Office","AADRoles","ManagerUPN","MfaRegistered","SSPREnabled","SSPRRegistered","RiskLevel","FailedMFA","MFAFraud"],accounts))
+        rows=[
+            ("UserPrincipalName",_portal_user(upn,uid)),
+            ("City",_first(risk.get("City"),a.get("City"),a.get("city"),r.get("city"))),
+            ("Country",_first(risk.get("Country"),a.get("Country"),a.get("country"),r.get("country"))),
+            ("Department",_first(a.get("Department"),a.get("department"),r.get("department"),risk.get("Department"))),
+            ("JobTitle",_first(a.get("JobTitle"),a.get("jobTitle"),r.get("jobTitle"),risk.get("JobTitle"))),
+            ("Office",_first(a.get("OfficeLocation"),a.get("officeLocation"),r.get("officeLocation"),risk.get("Office"))),
+            ("AADRoles",risk.get("AADRoles")),
+            ("ManagerUPN",_mailto(risk.get("ManagerUPN"))),
+            ("MfaRegistered",risk.get("MfaRegistered")),
+            ("SSPREnabled",risk.get("SSPREnabled")),
+            ("SSPRRegistered",risk.get("SSPRRegistered")),
+            ("RiskLevel",risk.get("UserRiskLevel")),
+            ("FailedMFA",risk.get("UserFailedMFACount")),
+            ("MFAFraud",risk.get("UserMFAFraudCount")),
+        ]
+        heading="#### Account" if len(base.get("Accounts",[])) == 1 else f"#### Account {index}"
+        account_sections.append(heading+"\n\n"+_vertical_table(rows))
+    if account_sections:
+        sections.append("### Account Info\n\n"+"\n\n".join(account_sections))
 
     ips=[]
     for item in base.get("IPs",[]):
