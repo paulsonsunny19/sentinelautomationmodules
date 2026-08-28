@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "2.3.1.0",
+  "parameters": {
+    "STATFunctionName": { "type": "string" },
+    "STATStorageName": { "type": "string" },
+    "STATConnectorName": { "type": "string", "defaultValue": "SentinelTriageAssistantv2" },
+    "STATConnectorDisplayName": { "type": "string", "defaultValue": "STAT v2" },
+    "location": { "type": "string", "defaultValue": "[resourceGroup().location]" },
+    "FunctionPackage": { "type": "string", "metadata": { "description": "DIRECT Azure Blob URL to stat.zip, normally with a read-only SAS token. Redirecting GitHub Release URLs are not supported by Linux Consumption." } },
+    "identityType": { "type": "string", "defaultValue": "system", "allowedValues": ["system", "user", "sp"] },
+    "UserIdentityResourceId": { "type": "string", "defaultValue": "" },
+    "ServicePrincipalClientId": { "type": "string", "defaultValue": "" },
+    "ServicePrincipalSecret": { "type": "securestring", "defaultValue": "" },
+    "AADTenantId": { "type": "string", "defaultValue": "[subscription().tenantId]" },
+    "DeployBasicSample": { "type": "bool", "defaultValue": false },
+    "BasicSamplePlaybookName": { "type": "string", "defaultValue": "STAT-Basic-Triage" },
+    "MSGraphEndpoint": { "type": "string", "defaultValue": "graph.microsoft.com" },
+    "M365DEndpoint": { "type": "string", "defaultValue": "api.security.microsoft.com" },
+    "MDEEndpoint": { "type": "string", "defaultValue": "api.securitycenter.microsoft.com" },
+    "LogAnalyticsEndpoint": { "type": "string", "defaultValue": "api.loganalytics.io" },
+    "AzureResourceManagerEndpoint": { "type": "string", "defaultValue": "management.azure.com" }
+  },
+  "variables": {
+    "template": "[if(equals(parameters('identityType'),'user'),'UserAssignedIdentity.json',if(equals(parameters('identityType'),'sp'),'ServicePrincipalIdentity.json','SystemIdentity.json'))]",
+    "templateUri": "[format('https://raw.githubusercontent.com/paulsonsunny19/sentinelautomationmodules/fix/linux-consumption-package/Function/{0}', variables('template'))]",
+    "connectorTemplate": "https://raw.githubusercontent.com/briandelmsft/SentinelAutomationModules/main/Connector/connector.json",
+    "basicSampleTemplate": "https://raw.githubusercontent.com/briandelmsft/SentinelAutomationModules/main/Samples/basicsample.json"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-05-01", "name": "[parameters('STATStorageName')]", "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS" }, "kind": "StorageV2", "properties": { "allowBlobPublicAccess": false }
+    },
+    {
+      "type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "STATFunction",
+      "dependsOn": ["[resourceId('Microsoft.Storage/storageAccounts', parameters('STATStorageName'))]"],
+      "properties": { "mode": "Incremental", "templateLink": { "uri": "[variables('templateUri')]" }, "parameters": {
+        "STATFunctionName": { "value": "[parameters('STATFunctionName')]" }, "STATStorageName": { "value": "[parameters('STATStorageName')]" }, "location": { "value": "[parameters('location')]" },
+        "FunctionPackage": { "value": "[parameters('FunctionPackage')]" }, "UserIdentityResourceId": { "value": "[parameters('UserIdentityResourceId')]" },
+        "ServicePrincipalClientId": { "value": "[parameters('ServicePrincipalClientId')]" }, "ServicePrincipalSecret": { "value": "[parameters('ServicePrincipalSecret')]" },
+        "AADTenantId": { "value": "[parameters('AADTenantId')]" }, "MSGraphEndpoint": { "value": "[parameters('MSGraphEndpoint')]" }, "M365DEndpoint": { "value": "[parameters('M365DEndpoint')]" },
+        "MDEEndpoint": { "value": "[parameters('MDEEndpoint')]" }, "LogAnalyticsEndpoint": { "value": "[parameters('LogAnalyticsEndpoint')]" }, "AzureResourceManagerEndpoint": { "value": "[parameters('AzureResourceManagerEndpoint')]" }
+      }}
+    },
+    {
+      "type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "STATConnector", "dependsOn": ["STATFunction"],
+      "properties": { "mode": "Incremental", "templateLink": { "uri": "[variables('connectorTemplate')]" }, "parameters": {
+        "CustomConnectorName": { "value": "[parameters('STATConnectorName')]" }, "CustomConnectorDisplayName": { "value": "[parameters('STATConnectorDisplayName')]" },
+        "STATFunctionSiteName": { "value": "[reference(resourceId('Microsoft.Web/sites', parameters('STATFunctionName')), '2022-03-01').defaultHostName]" },
+        "STATFunctionName": { "value": "[parameters('STATFunctionName')]" }, "STATFunctionResourceId": { "value": "[resourceId('Microsoft.Web/sites', parameters('STATFunctionName'))]" },
+        "DeployBasicSample": { "value": "[parameters('DeployBasicSample')]" }, "BasicSampleTemplate": { "value": "[variables('basicSampleTemplate')]" }, "BasicSamplePlaybookName": { "value": "[parameters('BasicSamplePlaybookName')]" }
+      }}
+    }
+  ],
+  "outputs": {
+    "functionResourceId": { "type": "string", "value": "[resourceId('Microsoft.Web/sites', parameters('STATFunctionName'))]" },
+    "connectorName": { "type": "string", "value": "[parameters('STATConnectorName')]" },
+    "packageMode": { "type": "string", "value": "Direct Azure Blob URL" }
+  }
+}

@@ -1,15 +1,15 @@
-# Sentinel Automation Modules
+# Sentinel Automation Modules — Linux Consumption deployment fix
 
-Azure deployment-compatible fork of briandelmsft/SentinelAutomationModules.
+Deployable STAT package based on `briandelmsft/SentinelAutomationModules`, updated for Azure's Linux Consumption restriction on redirected `WEBSITE_RUN_FROM_PACKAGE` URLs.
 
-This fork addresses the Linux Consumption Function App restriction that prevents `WEBSITE_RUN_FROM_PACKAGE` from using redirecting GitHub Release URLs.
+The original deployment uses a GitHub Releases URL for `stat.zip`; this fork requires `FunctionPackage` to be a direct Azure Blob Storage URL, normally a read-only Blob SAS URL.
 
-## Deployment package fix
+## Deploy
 
-Use a direct Azure Blob Storage URL (normally a read-only Blob SAS URL) for `FunctionPackage`, for example:
+**Azure Portal:** https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fpaulsonsunny19%2Fsentinelautomationmodules%2Ffix%2Flinux-consumption-package%2FDeploy%2Fstatdeploy.json
 
-```
-https://<account>.blob.core.windows.net/<container>/stat.zip?<SAS>
-```
+Read [DEPLOY-AZURE.md](DEPLOY-AZURE.md) first. Upload `stat.zip` to Azure Blob Storage and provide its direct read-only SAS URL during deployment.
 
-Source: https://github.com/briandelmsft/SentinelAutomationModules
+The template creates the storage account and Function App, then deploys the official upstream STAT custom Logic Apps connector and optionally the upstream basic sample. The connector/sample remain referenced from the upstream repository rather than duplicated in this fork. Recommended identity: `system`.
+
+Upstream: https://github.com/briandelmsft/SentinelAutomationModules
