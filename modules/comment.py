@@ -11,53 +11,41 @@ def _plain(value: Any) -> str:
 
 def _html(value: Any) -> str: return escape(_plain(value), quote=True)
 
-
 def _raw(item: dict[str, Any]) -> dict[str, Any]:
     raw=item.get("RawEntity"); return raw if isinstance(raw,dict) else item
 
-
 def _additional(raw: dict[str, Any]) -> dict[str, Any]:
     data=raw.get("additionalData") or raw.get("AdditionalData"); return data if isinstance(data,dict) else {}
-
 
 def _first(*values: Any) -> Any:
     for value in values:
         if value is not None and value != "": return value
     return None
 
-
 class _SafeHtml(str): pass
-
 
 def _html_table(headers: list[str], rows: list[list[Any]]) -> str:
     if not rows: return ""
     head="".join(f"<th>{_html(h)}</th>" for h in headers); body=[]
     for row in rows:
         cells=[]
-        for value in row:
-            cells.append(f"<td>{value}</td>" if isinstance(value,_SafeHtml) else f"<td>{_html(value)}</td>")
+        for value in row: cells.append(f"<td>{value}</td>" if isinstance(value,_SafeHtml) else f"<td>{_html(value)}</td>")
         body.append("<tr>"+"".join(cells)+"</tr>")
     return "<table><thead><tr>"+head+"</tr></thead><tbody>"+"".join(body)+"</tbody></table>"
 
-
 def _vertical_table(rows: list[tuple[str, Any]]) -> str: return _html_table(["Field","Value"],[[f,v] for f,v in rows])
-
 
 def _portal_user(upn: Any,user_id: Any) -> _SafeHtml | None:
     if not upn: return None
     if not user_id: return _SafeHtml(_html(upn))
     return _SafeHtml(f'<a href="https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{escape(str(user_id),quote=True)}" target="_blank">{_html(upn)}</a><br>(Contact User)')
 
-
 def _mailto(upn: Any) -> _SafeHtml | None:
     if not upn: return None
     safe=escape(str(upn),quote=True); return _SafeHtml(f'<a href="mailto:{safe}" target="_blank">{_html(upn)}</a>')
 
-
 def _warnings(module: dict[str,Any]) -> str:
-    values=module.get("EnrichmentWarnings") or []
-    return "; ".join(str(x) for x in values) if values else "No enrichment warnings"
-
+    values=module.get("EnrichmentWarnings") or []; return "; ".join(str(x) for x in values) if values else "No enrichment warnings"
 
 def _context(module: dict[str,Any],count_keys: list[tuple[str,str]]) -> str:
     parts=[]
@@ -67,7 +55,6 @@ def _context(module: dict[str,Any],count_keys: list[tuple[str,str]]) -> str:
     warnings=module.get("EnrichmentWarnings") or []
     if warnings: parts.append("Warnings: "+"; ".join(str(x) for x in warnings[:3]))
     return "; ".join(parts) if parts else "No additional findings"
-
 
 def build_comment(base: dict[str,Any],scoring: dict[str,Any],aad: dict[str,Any]|None=None,related: dict[str,Any]|None=None,ti: dict[str,Any]|None=None,mde: dict[str,Any]|None=None,ueba: dict[str,Any]|None=None,file_insights: dict[str,Any]|None=None,mcas: dict[str,Any]|None=None) -> dict[str,Any]:
     aad,related,ti,mde,ueba,file_insights,mcas=[x if isinstance(x,dict) else {} for x in (aad,related,ti,mde,ueba,file_insights,mcas)]
@@ -81,17 +68,23 @@ def build_comment(base: dict[str,Any],scoring: dict[str,Any],aad: dict[str,Any]|
         account_sections.append(f"<h4>{'Account' if len(accounts)==1 else f'Account {index}'}</h4>"+_vertical_table(rows))
     if account_sections: sections.append("<h3>Account Info</h3>"+"".join(account_sections))
 
+    ip_enrichment=[x for x in mde.get("IPEnrichment",[]) if isinstance(x,dict)]
+    if ip_enrichment:
+        ip_rows=[[x.get("IP"),x.get("City"),x.get("State"),x.get("Country"),x.get("Organization"),x.get("OrganizationType"),x.get("ASN")] for x in ip_enrichment]
+        sections.append("<h3>IP Info</h3>"+_html_table(["IP","City","State","Country","Organization","OrganizationType","ASN"],ip_rows))
+    else:
+        ips=[]
+        for item in base.get("IPs",[]):
+            r=_raw(item); ips.append([item.get("Address") or r.get("address"),None,None,r.get("countryCode") or r.get("location"),None,None,None])
+        if ips: sections.append("<h3>IP Info</h3>"+_html_table(["IP","City","State","Country","Organization","OrganizationType","ASN"],ips))
+
     events=[x for x in aad.get("RiskEvents",[]) if isinstance(x,dict)]
     if events:
         rows=[]
         for e in events[:20]: rows.append([_mailto(e.get("UserPrincipalName")),e.get("RiskEventType"),e.get("RiskLevel"),e.get("RiskState"),e.get("RiskDetail"),e.get("Activity"),e.get("IPAddress"),e.get("DetectedDateTime")])
         sections.append("<h3>Entra ID Protection - Risky Events</h3>"+_html_table(["User","Risk Event","Level","State","Detail","Activity","IP Address","Detected"],rows))
-    else:
-        sections.append("<h3>Entra ID Protection - Risky Events</h3><p>No Entra ID Protection risk detections returned for the analyzed users.</p>")
+    else: sections.append("<h3>Entra ID Protection - Risky Events</h3><p>No Entra ID Protection risk detections returned for the analyzed users.</p>")
 
-    ips=[]
-    for item in base.get("IPs",[]): r=_raw(item); ips.append([item.get("Address") or r.get("address"),r.get("location") or r.get("countryCode"),r.get("friendlyName")])
-    if ips: sections.append("<h3>IP Info</h3>"+_html_table(["IP","Location","Name"],ips))
     hosts=[]
     for item in base.get("Hosts",[]): r=_raw(item); hosts.append([item.get("Hostname"),item.get("DnsDomain"),item.get("FQDN"),r.get("mdatpDeviceId") or r.get("MdatpDeviceId"),r.get("lastIpAddress") or r.get("LastIpAddress"),r.get("lastExternalIpAddress") or r.get("LastExternalIpAddress")])
     if hosts: sections.append("<h3>Host Info</h3>"+_html_table(["Host","Domain","FQDN","MDE Device ID","Last IP","External IP"],hosts))
@@ -106,7 +99,7 @@ def build_comment(base: dict[str,Any],scoring: dict[str,Any],aad: dict[str,Any]|
         ["AAD / Identity Risk",f"User risk: {aad.get('HighestRiskLevel','none')}; risk events: {aad.get('RiskEventCount',0)}; failed MFA: {aad.get('FailedMFATotalCount',0)}; fraud: {aad.get('MFAFraudTotalCount',0)}",_warnings(aad)],
         ["Related Alerts",related.get("RelatedAlertsCount",0),_context(related,[("RelatedAlertsCount","Related alerts")])],
         ["Threat Intelligence",ti.get("MatchedTIItemCount",0),_context(ti,[("MatchedTIItemCount","TI matches")])],
-        ["MDE",mde.get("AnalyzedEntities",mde.get("MachineCount",0)),_context(mde,[("AnalyzedEntities","Entities"),("MachineCount","Machines")])],
+        ["MDE",mde.get("AnalyzedEntities",mde.get("MachineCount",0)),_context(mde,[("AnalyzedEntities","Entities"),("MachineCount","Machines"),("IPEnrichment","IP enrichment")])],
         ["UEBA",ueba.get("AnomalyCount",0),_context(ueba,[("AnomalyCount","Anomalies")])],
         ["File Insights",file_insights.get("HashesLinkedToThreatCount",0),_context(file_insights,[("HashesLinkedToThreatCount","Threat-linked hashes")])],
         ["Defender for Cloud Apps",mcas.get("AnalyzedEntities",mcas.get("MatchedCount",0)),_context(mcas,[("AnalyzedEntities","Entities"),("MatchedCount","Matches")])]
