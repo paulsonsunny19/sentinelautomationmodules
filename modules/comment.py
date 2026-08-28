@@ -13,6 +13,18 @@ def _raw(item: dict[str, Any]) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else item
 
 
+def _additional(raw: dict[str, Any]) -> dict[str, Any]:
+    data = raw.get("additionalData") or raw.get("AdditionalData")
+    return data if isinstance(data, dict) else {}
+
+
+def _first(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
     if not rows:
         return ""
@@ -33,11 +45,33 @@ def build_comment(base: dict[str, Any], scoring: dict[str, Any], aad: dict[str, 
     accounts = []
     risk_by_upn = {str(x.get("UserPrincipalName", "")).lower(): x for x in aad.get("DetailedResults", []) if isinstance(x, dict)}
     for item in base.get("Accounts", []):
-        r = _raw(item); upn = r.get("userPrincipalName") or r.get("upn") or r.get("name") or item.get("UserPrincipalName")
+        r = _raw(item)
+        a = _additional(r)
+        upn = _first(a.get("UserPrincipalName"), a.get("userPrincipalName"), r.get("userPrincipalName"), r.get("upn"), item.get("UserPrincipalName"))
         risk = risk_by_upn.get(str(upn or "").lower(), {})
-        accounts.append([upn, r.get("displayName") or r.get("friendlyName"), r.get("aadUserId") or r.get("objectGuid"), risk.get("UserRiskLevel"), risk.get("UserFailedMFACount"), risk.get("UserMFAFraudCount")])
+        given = _first(a.get("GivenName"), a.get("givenName"), r.get("givenName"))
+        surname = _first(a.get("Surname"), a.get("surname"), r.get("surname"))
+        constructed_name = " ".join(str(x).strip() for x in (given, surname) if x).strip() or None
+        display_name = _first(a.get("DisplayName"), a.get("displayName"), r.get("displayName"), r.get("friendlyName"), constructed_name)
+        accounts.append([
+            upn,
+            display_name,
+            _first(a.get("JobTitle"), a.get("jobTitle"), r.get("jobTitle")),
+            _first(a.get("Department"), a.get("department"), r.get("department")),
+            _first(a.get("ManagerName"), a.get("managerName"), r.get("managerName")),
+            _first(a.get("OfficeLocation"), a.get("officeLocation"), r.get("officeLocation")),
+            _first(a.get("CompanyName"), a.get("companyName"), r.get("companyName")),
+            _first(a.get("AccountEnabled"), a.get("accountEnabled"), r.get("accountEnabled")),
+            _first(a.get("UserType"), a.get("userType"), r.get("userType")),
+            _first(r.get("aadUserId"), r.get("objectGuid"), a.get("AadUserId"), a.get("aadUserId")),
+            risk.get("UserRiskLevel"),
+            risk.get("UserFailedMFACount"),
+            risk.get("UserMFAFraudCount"),
+        ])
     if accounts:
-        sections.append("### Account Info\n\n" + _table(["UserPrincipalName", "DisplayName", "AADUserId", "RiskLevel", "FailedMFA", "MFAFraud"], accounts))
+        sections.append("### Account Info\n\n" + _table(
+            ["UserPrincipalName", "Name", "Job Title", "Department", "Manager", "Office", "Company", "Account Enabled", "User Type", "AAD User ID", "Risk Level", "Failed MFA", "MFA Fraud"],
+            accounts))
 
     ips = []
     for item in base.get("IPs", []):
