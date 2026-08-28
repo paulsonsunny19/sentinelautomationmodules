@@ -17,7 +17,7 @@ class AADRisksRequest:
     mfa_failure_lookup: bool = True
     mfa_fraud_lookup: bool = True
 
-RANK={'unknown':0,'none':1,'low':2,'medium':3,'high':4}
+RANK={'unknown':0,'none':1,'low':2,'medium':3,'high':4,'hidden':0,'unknownfuturevalue':0}
 
 
 def _additional(raw: dict[str,Any]) -> dict[str,Any]:
@@ -48,7 +48,6 @@ def _graph_get(token: str,url: str,warnings: list[str],label: str) -> dict[str,A
             value=json.loads(response.read().decode())
             return value if isinstance(value,dict) else None
     except urllib.error.HTTPError as exc:
-        # Keep diagnostics useful without returning access tokens, URLs or Graph response bodies.
         warnings.append(f'{label}: Microsoft Graph returned HTTP {exc.code}')
     except urllib.error.URLError:
         warnings.append(f'{label}: Microsoft Graph connection failed')
@@ -57,13 +56,44 @@ def _graph_get(token: str,url: str,warnings: list[str],label: str) -> dict[str,A
     return None
 
 
-def _graph_risk(token: str,account: dict[str,str],warnings: list[str]) -> tuple[str,str]:
+def _graph_risky_user(token: str,account: dict[str,str],warnings: list[str]) -> dict[str,Any]:
     filt=f"id eq '{account['id']}'" if account['id'] else f"userPrincipalName eq '{account['upn'].replace(chr(39),chr(39)*2)}'"
-    url='https://graph.microsoft.com/v1.0/identityProtection/riskyUsers?$select=id,userPrincipalName,riskLevel&$filter='+urllib.parse.quote(filt,safe=" ='@.")
-    data=_graph_get(token,url,warnings,'Risk lookup') or {}; values=data.get('value',[])
-    if values:
-        return str(values[0].get('riskLevel') or 'unknown').lower(),str(values[0].get('id') or account['id'])
-    return 'unknown',account['id']
+    select='id,userPrincipalName,userDisplayName,riskLevel,riskState,riskDetail,riskLastUpdatedDateTime'
+    url='https://graph.microsoft.com/v1.0/identityProtection/riskyUsers?$select='+select+'&$filter='+urllib.parse.quote(filt,safe=" ='@.")
+    data=_graph_get(token,url,warnings,'Risky user lookup') or {}; values=data.get('value',[])
+    return values[0] if values and isinstance(values[0],dict) else {}
+
+
+def _graph_risk_detections(token: str,account: dict[str,str],warnings: list[str]) -> list[dict[str,Any]]:
+    # IdentityRiskEvent.Read.All is the least-privileged application permission for riskDetections.
+    if account['id']:
+        filt=f"userId eq '{account['id']}'"
+    elif account['upn']:
+        filt=f"userPrincipalName eq '{account['upn'].replace(chr(39),chr(39)*2)}'"
+    else:
+        return []
+    select='id,userId,userPrincipalName,riskEventType,riskLevel,riskState,riskDetail,source,detectionTimingType,activity,ipAddress,activityDateTime,detectedDateTime,lastUpdatedDateTime'
+    url='https://graph.microsoft.com/v1.0/identityProtection/riskDetections?$select='+select+'&$filter='+urllib.parse.quote(filt,safe=" ='@.")+'&$top=50'
+    data=_graph_get(token,url,warnings,'Risk detections')
+    if data is None: return []
+    rows=[]
+    for item in data.get('value',[]):
+        if not isinstance(item,dict): continue
+        rows.append({
+            'RiskEventType':item.get('riskEventType'),
+            'RiskLevel':item.get('riskLevel'),
+            'RiskState':item.get('riskState'),
+            'RiskDetail':item.get('riskDetail'),
+            'Activity':item.get('activity'),
+            'Source':item.get('source'),
+            'DetectionTimingType':item.get('detectionTimingType'),
+            'IPAddress':item.get('ipAddress'),
+            'ActivityDateTime':item.get('activityDateTime'),
+            'DetectedDateTime':item.get('detectedDateTime'),
+            'LastUpdatedDateTime':item.get('lastUpdatedDateTime'),
+        })
+    rows.sort(key=lambda x:str(x.get('DetectedDateTime') or x.get('ActivityDateTime') or ''),reverse=True)
+    return rows
 
 
 def _graph_profile(token: str,account: dict[str,str],warnings: list[str]) -> tuple[dict[str,Any],str]:
@@ -93,8 +123,7 @@ def _graph_roles(token: str,user_id: str,warnings: list[str]) -> list[str] | Non
     filt=urllib.parse.quote(f"principalId eq '{user_id}'",safe=" ='" )
     assignments=_graph_get(token,'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$select=roleDefinitionId&$filter='+filt,warnings,'Directory role assignments')
     if assignments is None: return None
-    names=[]
-    role_cache={}
+    names=[]; role_cache={}
     for assignment in assignments.get('value',[]):
         role_id=assignment.get('roleDefinitionId') if isinstance(assignment,dict) else None
         if not role_id: continue
@@ -108,14 +137,20 @@ def _graph_roles(token: str,user_id: str,warnings: list[str]) -> list[str] | Non
 def query_aad_risks(req: AADRisksRequest) -> dict[str,Any]:
     accounts=_accounts(req.base); days=max(1,min(int(req.lookback_days),90)); credential=DefaultAzureCredential(exclude_interactive_browser_credential=True)
     token=credential.get_token('https://graph.microsoft.com/.default').token
-    logs=LogsQueryClient(credential); details=[]; warnings=[]
+    logs=LogsQueryClient(credential); details=[]; warnings=[]; all_events=[]
     for account in accounts:
-        account_warnings=[]
-        risk,risk_uid=_graph_risk(token,account,account_warnings); failed=0; fraud=0; upn=account['upn']
-        profile,profile_uid=_graph_profile(token,{'id':account['id'] or risk_uid,'upn':upn},account_warnings)
-        uid=profile_uid or risk_uid or account['id']
+        account_warnings=[]; failed=0; fraud=0; upn=account['upn']
+        risky_user=_graph_risky_user(token,account,account_warnings)
+        profile,profile_uid=_graph_profile(token,account,account_warnings)
+        uid=profile_uid or str(risky_user.get('id') or '') or account['id']
+        graph_account={'id':uid,'upn':upn}
+        risk_events=_graph_risk_detections(token,graph_account,account_warnings)
+        for event in risk_events:
+            all_events.append({'UserPrincipalName':upn,'UserId':uid,**event})
         registration=_graph_registration(token,uid,account_warnings)
         roles=_graph_roles(token,uid,account_warnings)
+        risk=str(risky_user.get('riskLevel') or 'none').lower() if risky_user else 'none'
+        if risk in ('hidden','unknownfuturevalue'): risk='unknown'
         if upn and (req.mfa_failure_lookup or req.mfa_fraud_lookup):
             safe=upn.replace("'","''"); parts=[]
             if req.mfa_failure_lookup:
@@ -128,12 +163,10 @@ def query_aad_risks(req: AADRisksRequest) -> dict[str,Any]:
                     t=result.tables[0]
                     for row in t.rows:
                         d=dict(zip(t.columns,row)); failed=int(d.get('Count',0)) if d.get('Kind')=='failed' else failed; fraud=int(d.get('Count',0)) if d.get('Kind')=='fraud' else fraud
-                elif result.status!=LogsQueryStatus.SUCCESS:
-                    account_warnings.append('MFA telemetry query did not complete successfully')
-            except Exception:
-                account_warnings.append('MFA telemetry query failed')
-        detail={'UserFailedMFACount':failed,'UserMFAFraudCount':fraud,'UserId':uid,'UserPrincipalName':upn,'UserRiskLevel':risk,'AADRoles':roles,**profile,**registration}
+                elif result.status!=LogsQueryStatus.SUCCESS: account_warnings.append('MFA telemetry query did not complete successfully')
+            except Exception: account_warnings.append('MFA telemetry query failed')
+        detail={'UserFailedMFACount':failed,'UserMFAFraudCount':fraud,'UserId':uid,'UserPrincipalName':upn,'UserRiskLevel':risk,'UserRiskState':risky_user.get('riskState') if risky_user else None,'UserRiskDetail':risky_user.get('riskDetail') if risky_user else None,'UserRiskLastUpdated':risky_user.get('riskLastUpdatedDateTime') if risky_user else None,'RiskEventCount':len(risk_events),'AADRoles':roles,**profile,**registration}
         if account_warnings: detail['EnrichmentWarnings']=sorted(set(account_warnings))
         details.append(detail); warnings.extend(account_warnings)
-    highest=max((x['UserRiskLevel'] for x in details),key=lambda x:RANK.get(x,0),default='unknown')
-    return {'AnalyzedEntities':len(details),'FailedMFATotalCount':sum(x['UserFailedMFACount'] for x in details),'HighestRiskLevel':highest,'MFAFraudTotalCount':sum(x['UserMFAFraudCount'] for x in details),'ModuleName':'AADRisksModule','DetailedResults':details,'EnrichmentWarnings':sorted(set(warnings))}
+    highest=max((x['UserRiskLevel'] for x in details),key=lambda x:RANK.get(x,0),default='none')
+    return {'AnalyzedEntities':len(details),'FailedMFATotalCount':sum(x['UserFailedMFACount'] for x in details),'HighestRiskLevel':highest,'MFAFraudTotalCount':sum(x['UserMFAFraudCount'] for x in details),'RiskEventCount':len(all_events),'RiskEvents':all_events,'ModuleName':'AADRisksModule','DetailedResults':details,'EnrichmentWarnings':sorted(set(warnings))}
