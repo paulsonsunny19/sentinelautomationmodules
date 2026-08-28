@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
-import ipaddress
 import json, urllib.parse, urllib.request
 from azure.identity import DefaultAzureCredential
 
@@ -34,24 +33,14 @@ def _advanced_query(credential:DefaultAzureCredential,query:str)->list[dict[str,
             return [x for x in data.get('Results',[]) if isinstance(x,dict)]
     except Exception:return []
 
-def _public_ip(value:Any)->str|None:
-    try:
-        ip=ipaddress.ip_address(str(value)); return str(ip) if ip.is_global else None
-    except (ValueError,TypeError): return None
-
-def _ip_geo(credential:DefaultAzureCredential,ip:str,days:int)->dict[str,Any]:
-    # Defender XDR enriches public RemoteIP observations with GeoIP fields. We query only
-    # the incident IP and return a bounded, normalized result; no third-party service is used.
-    safe=ip.replace("'","''")
-    query=(f"DeviceNetworkEvents | where Timestamp > ago({days}d) | where RemoteIP == '{safe}' "
-           "| summarize arg_max(Timestamp, RemoteIPCountry, RemoteIPState, RemoteIPCity, RemoteIPOrganization, RemoteIPOrganizationType, RemoteIPASN) by RemoteIP "
-           "| project IP=RemoteIP, Country=RemoteIPCountry, State=RemoteIPState, City=RemoteIPCity, Organization=RemoteIPOrganization, OrganizationType=RemoteIPOrganizationType, ASN=RemoteIPASN")
-    rows=_advanced_query(credential,query)
-    return rows[0] if rows else {}
-
 def query_mde(req:MDERequest)->dict[str,Any]:
+    """Return Defender-specific account/device/IP/host context.
+
+    Generic GeoIP/ASN enrichment belongs to Base, matching original STAT.  MDE only
+    correlates incident entities to Defender machines and device telemetry.
+    """
     credential=DefaultAzureCredential(exclude_interactive_browser_credential=True); days=max(1,min(int(req.lookback_days),30))
-    account_results=[]; ip_results=[]; host_results=[]; ip_enrichment=[]; warnings=[]
+    account_results=[]; ip_results=[]; host_results=[]
     for x in req.base.get('Accounts',[]):
         raw=x.get('RawEntity',x); sid=x.get('ObjectSID') or raw.get('sid'); upn=x.get('UserPrincipalName') or raw.get('userPrincipalName'); uid=x.get('AADUserId') or raw.get('aadUserId'); devices=[]
         if sid:
@@ -66,13 +55,6 @@ def query_mde(req:MDERequest)->dict[str,Any]:
         raw=x.get('RawEntity',x); ip=x.get('Address') or raw.get('address'); machines=_machines(credential,f"lastIpAddress eq '{ip}'") if ip else []
         for m in machines: m['EntityIPAddress']=ip
         ip_results.extend(machines)
-        public=_public_ip(ip)
-        if public:
-            geo=_ip_geo(credential,public,days)
-            ip_enrichment.append({'IP':public,'City':geo.get('City'),'State':geo.get('State'),'Country':geo.get('Country'),'Organization':geo.get('Organization'),'OrganizationType':geo.get('OrganizationType'),'ASN':geo.get('ASN'),'Source':'Microsoft Defender XDR'})
-            if not geo: warnings.append(f'IP enrichment: no Defender XDR GeoIP observation returned for {public}')
-        elif ip:
-            ip_enrichment.append({'IP':str(ip),'City':None,'State':None,'Country':None,'Organization':None,'OrganizationType':None,'ASN':None,'Source':'Private/reserved IP - GeoIP not applicable'})
     for x in req.base.get('Hosts',[]):
         raw=x.get('RawEntity',x); mid=raw.get('mdatpDeviceId') or raw.get('MdatpDeviceId'); fqdn=x.get('FQDN') or x.get('Hostname'); machines=[]
         if mid:
@@ -80,6 +62,4 @@ def query_mde(req:MDERequest)->dict[str,Any]:
             except Exception: pass
         elif fqdn: machines=_machines(credential,f"computerDnsName eq '{str(fqdn).replace(chr(39),chr(39)*2)}'")
         host_results.extend(machines)
-    result={'AnalyzedEntities':len(account_results)+len(req.base.get('IPs',[]))+len(req.base.get('Hosts',[])),'IPsHighestExposureLevel':_highest([x.get('exposureLevel') for x in ip_results]),'IPsHighestRiskScore':_highest([x.get('riskScore') for x in ip_results]),'UsersHighestExposureLevel':_highest([x.get('UserHighestExposureLevel') for x in account_results]),'UsersHighestRiskScore':_highest([x.get('UserHighestRiskScore') for x in account_results]),'HostsHighestExposureLevel':_highest([x.get('exposureLevel') for x in host_results]),'HostsHighestRiskScore':_highest([x.get('riskScore') for x in host_results]),'IPEnrichment':ip_enrichment,'ModuleName':'MDEModule','DetailedResults':{'Accounts':account_results,'IPs':ip_results,'Hosts':host_results}}
-    if warnings: result['EnrichmentWarnings']=sorted(set(warnings))
-    return result
+    return {'AnalyzedEntities':len(account_results)+len(req.base.get('IPs',[]))+len(req.base.get('Hosts',[])),'IPsHighestExposureLevel':_highest([x.get('exposureLevel') for x in ip_results]),'IPsHighestRiskScore':_highest([x.get('riskScore') for x in ip_results]),'UsersHighestExposureLevel':_highest([x.get('UserHighestExposureLevel') for x in account_results]),'UsersHighestRiskScore':_highest([x.get('UserHighestRiskScore') for x in account_results]),'HostsHighestExposureLevel':_highest([x.get('exposureLevel') for x in host_results]),'HostsHighestRiskScore':_highest([x.get('riskScore') for x in host_results]),'ModuleName':'MDEModule','DetailedResults':{'Accounts':account_results,'IPs':ip_results,'Hosts':host_results}}
