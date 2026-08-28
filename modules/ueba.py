@@ -12,6 +12,9 @@ class UEBARequest:
     lookback_days: int = 14
     minimum_investigation_priority: int = 1
 
+def _column_names(columns):
+    return [str(getattr(c,'name',c)) for c in columns]
+
 def _upns(base: dict[str,Any])->list[str]:
     out=[]
     for x in base.get('Accounts',[]):
@@ -41,9 +44,9 @@ BehaviorAnalytics
     try:
         result=client.query_workspace(req.workspace_id,query,timespan=timedelta(days=days),server_timeout=20)
         if result.status==LogsQueryStatus.SUCCESS and result.tables:
-            t=result.tables[0]; names=[c.name for c in t.columns]; detail=[dict(zip(names,r)) for r in t.rows]
+            t=result.tables[0]; names=_column_names(t.columns); detail=[dict(zip(names,r)) for r in t.rows]
         elif result.status==LogsQueryStatus.PARTIAL: warnings.append('UEBA BehaviorAnalytics query returned a partial result')
-    except Exception as exc: warnings.append(f'UEBA BehaviorAnalytics query failed ({type(exc).__name__})')
+    except Exception as exc: warnings.append(f'UEBA BehaviorAnalytics query failed ({type(exc).__name__}: {str(exc)[:160]})')
     anomaly_count=0; tactics=[]
     anomaly_query=f'''Anomalies
 | where TimeGenerated >= ago({days}d)
@@ -52,13 +55,13 @@ BehaviorAnalytics
     try:
         ar=client.query_workspace(req.workspace_id,anomaly_query,timespan=timedelta(days=days),server_timeout=20)
         if ar.status==LogsQueryStatus.SUCCESS and ar.tables and ar.tables[0].rows:
-            names=[c.name for c in ar.tables[0].columns]; d=dict(zip(names,ar.tables[0].rows[0])); anomaly_count=int(d.get('AnomalyCount') or 0)
+            names=_column_names(ar.tables[0].columns); d=dict(zip(names,ar.tables[0].rows[0])); anomaly_count=int(d.get('AnomalyCount') or 0)
             raw=d.get('AnomalyTactics') or []
             for value in raw if isinstance(raw,list) else [raw]:
                 if isinstance(value,list): tactics.extend(str(x) for x in value if x)
                 elif value: tactics.extend(x.strip() for x in str(value).split(',') if x.strip())
         elif ar.status==LogsQueryStatus.PARTIAL: warnings.append('UEBA Anomalies query returned a partial result')
-    except Exception as exc: warnings.append(f'UEBA Anomalies query failed ({type(exc).__name__})')
+    except Exception as exc: warnings.append(f'UEBA Anomalies query failed ({type(exc).__name__}: {str(exc)[:160]})')
     count=sum(int(x.get('EventCount') or 0) for x in detail); priority_sum=sum(int(x.get('InvestigationPrioritySum') or 0) for x in detail); ti=sum(int(x.get('ThreatIntelMatchCount') or 0) for x in detail); max_priority=max((int(x.get('InvestigationPriorityMax') or 0) for x in detail),default=0); average=(priority_sum/count if count else 0); tactics=sorted(set(tactics))
     result={'AllEntityEventCount':count,'AllEntityInvestigationPriorityAverage':average,'AllEntityInvestigationPriorityMax':max_priority,'AllEntityInvestigationPrioritySum':priority_sum,'AnomalyCount':anomaly_count,'AnomalyTactics':tactics,'AnomalyTacticsCount':len(tactics),'DetailedResults':detail,'InvestigationPrioritiesFound':count>0,'ModuleName':'UEBAModule','ThreatIntelFound':ti>0,'ThreatIntelMatchCount':ti}
     if warnings: result['EnrichmentWarnings']=sorted(set(warnings))
