@@ -3,109 +3,103 @@ from typing import Any
 
 
 def _v(value: Any) -> str:
-    if value is None or value == "":
-        return "None"
+    if value is None or value == "": return "None"
+    if isinstance(value,list): value = "[" + ", ".join(str(x) for x in value) + "]"
     return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def _raw(item: dict[str, Any]) -> dict[str, Any]:
-    raw = item.get("RawEntity")
-    return raw if isinstance(raw, dict) else item
+    raw=item.get("RawEntity"); return raw if isinstance(raw,dict) else item
 
 
 def _additional(raw: dict[str, Any]) -> dict[str, Any]:
-    data = raw.get("additionalData") or raw.get("AdditionalData")
-    return data if isinstance(data, dict) else {}
+    data=raw.get("additionalData") or raw.get("AdditionalData"); return data if isinstance(data,dict) else {}
 
 
 def _first(*values: Any) -> Any:
     for value in values:
-        if value is not None and value != "":
-            return value
+        if value is not None and value != "": return value
     return None
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
-    if not rows:
-        return ""
-    head = "| " + " | ".join(headers) + " |"
-    sep = "| " + " | ".join(["---"] * len(headers)) + " |"
-    body = ["| " + " | ".join(_v(x) for x in row) + " |" for row in rows]
-    return "\n".join([head, sep, *body])
+    if not rows: return ""
+    head="| " + " | ".join(headers) + " |"; sep="| " + " | ".join(["---"]*len(headers)) + " |"
+    body=["| " + " | ".join(_v(x) for x in row) + " |" for row in rows]
+    return "\n".join([head,sep,*body])
+
+
+def _portal_user(upn: Any,user_id: Any) -> str | None:
+    if not upn: return None
+    if not user_id: return str(upn)
+    return f"[{upn}](https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/{user_id})<br>(Contact User)"
+
+
+def _mailto(upn: Any) -> str | None:
+    return f"[{upn}](mailto:{upn})" if upn else None
 
 
 def build_comment(base: dict[str, Any], scoring: dict[str, Any], aad: dict[str, Any] | None = None,
                   related: dict[str, Any] | None = None, ti: dict[str, Any] | None = None,
                   mde: dict[str, Any] | None = None, ueba: dict[str, Any] | None = None,
                   file_insights: dict[str, Any] | None = None, mcas: dict[str, Any] | None = None) -> dict[str, Any]:
-    aad, related, ti, mde, ueba, file_insights, mcas = [x if isinstance(x, dict) else {} for x in (aad, related, ti, mde, ueba, file_insights, mcas)]
-    score = scoring.get("TotalScore", 0)
-    sections = [f"## STAT Next Triage\n\n**Risk Score:** {_v(score)}  \n**Entities Analyzed:** {_v(base.get('EntitiesCount', 0))}"]
+    aad,related,ti,mde,ueba,file_insights,mcas=[x if isinstance(x,dict) else {} for x in (aad,related,ti,mde,ueba,file_insights,mcas)]
+    score=scoring.get("TotalScore",0)
+    sections=[f"## STAT Next Triage\n\n**Risk Score:** {_v(score)}  \n**Entities Analyzed:** {_v(base.get('EntitiesCount',0))}"]
 
-    accounts = []
-    risk_by_upn = {str(x.get("UserPrincipalName", "")).lower(): x for x in aad.get("DetailedResults", []) if isinstance(x, dict)}
-    for item in base.get("Accounts", []):
-        r = _raw(item)
-        a = _additional(r)
-        upn = _first(a.get("UserPrincipalName"), a.get("userPrincipalName"), r.get("userPrincipalName"), r.get("upn"), item.get("UserPrincipalName"))
-        risk = risk_by_upn.get(str(upn or "").lower(), {})
-        given = _first(a.get("GivenName"), a.get("givenName"), r.get("givenName"))
-        surname = _first(a.get("Surname"), a.get("surname"), r.get("surname"))
-        constructed_name = " ".join(str(x).strip() for x in (given, surname) if x).strip() or None
-        display_name = _first(a.get("DisplayName"), a.get("displayName"), r.get("displayName"), r.get("friendlyName"), constructed_name)
+    accounts=[]
+    details=[x for x in aad.get("DetailedResults",[]) if isinstance(x,dict)]
+    risk_by_upn={str(x.get("UserPrincipalName","")).lower():x for x in details}
+    risk_by_id={str(x.get("UserId","")).lower():x for x in details if x.get("UserId")}
+    for item in base.get("Accounts",[]):
+        r=_raw(item); a=_additional(r)
+        upn=_first(a.get("UserPrincipalName"),a.get("userPrincipalName"),r.get("userPrincipalName"),r.get("upn"),item.get("UserPrincipalName"))
+        uid=_first(r.get("aadUserId"),r.get("objectGuid"),a.get("AadUserId"),a.get("aadUserId"))
+        risk=risk_by_upn.get(str(upn or "").lower()) or risk_by_id.get(str(uid or "").lower()) or {}
         accounts.append([
-            upn,
-            display_name,
-            _first(a.get("JobTitle"), a.get("jobTitle"), r.get("jobTitle")),
-            _first(a.get("Department"), a.get("department"), r.get("department")),
-            _first(a.get("ManagerName"), a.get("managerName"), r.get("managerName")),
-            _first(a.get("OfficeLocation"), a.get("officeLocation"), r.get("officeLocation")),
-            _first(a.get("CompanyName"), a.get("companyName"), r.get("companyName")),
-            _first(a.get("AccountEnabled"), a.get("accountEnabled"), r.get("accountEnabled")),
-            _first(a.get("UserType"), a.get("userType"), r.get("userType")),
-            _first(r.get("aadUserId"), r.get("objectGuid"), a.get("AadUserId"), a.get("aadUserId")),
+            _portal_user(upn,uid),
+            _first(risk.get("City"),a.get("City"),a.get("city"),r.get("city")),
+            _first(risk.get("Country"),a.get("Country"),a.get("country"),r.get("country")),
+            _first(a.get("Department"),a.get("department"),r.get("department"),risk.get("Department")),
+            _first(a.get("JobTitle"),a.get("jobTitle"),r.get("jobTitle"),risk.get("JobTitle")),
+            _first(a.get("OfficeLocation"),a.get("officeLocation"),r.get("officeLocation"),risk.get("Office")),
+            risk.get("AADRoles"),
+            _mailto(risk.get("ManagerUPN")),
+            risk.get("MfaRegistered"),
+            risk.get("SSPREnabled"),
+            risk.get("SSPRRegistered"),
             risk.get("UserRiskLevel"),
             risk.get("UserFailedMFACount"),
             risk.get("UserMFAFraudCount"),
         ])
     if accounts:
-        sections.append("### Account Info\n\n" + _table(
-            ["UserPrincipalName", "Name", "Job Title", "Department", "Manager", "Office", "Company", "Account Enabled", "User Type", "AAD User ID", "Risk Level", "Failed MFA", "MFA Fraud"],
-            accounts))
+        sections.append("### Account Info\n\n"+_table(
+            ["UserPrincipalName","City","Country","Department","JobTitle","Office","AADRoles","ManagerUPN","MfaRegistered","SSPREnabled","SSPRRegistered","RiskLevel","FailedMFA","MFAFraud"],accounts))
 
-    ips = []
-    for item in base.get("IPs", []):
-        r = _raw(item); ips.append([item.get("Address") or r.get("address"), r.get("location") or r.get("countryCode"), r.get("friendlyName")])
-    if ips:
-        sections.append("### IP Info\n\n" + _table(["IP", "Location", "Name"], ips))
+    ips=[]
+    for item in base.get("IPs",[]):
+        r=_raw(item); ips.append([item.get("Address") or r.get("address"),r.get("location") or r.get("countryCode"),r.get("friendlyName")])
+    if ips: sections.append("### IP Info\n\n"+_table(["IP","Location","Name"],ips))
 
-    hosts = []
-    for item in base.get("Hosts", []):
-        r = _raw(item); hosts.append([item.get("Hostname"), item.get("DnsDomain"), item.get("FQDN"), r.get("mdatpDeviceId") or r.get("MdatpDeviceId"), r.get("lastIpAddress") or r.get("LastIpAddress"), r.get("lastExternalIpAddress") or r.get("LastExternalIpAddress")])
-    if hosts:
-        sections.append("### Host Info\n\n" + _table(["Host", "Domain", "FQDN", "MDE Device ID", "Last IP", "External IP"], hosts))
+    hosts=[]
+    for item in base.get("Hosts",[]):
+        r=_raw(item); hosts.append([item.get("Hostname"),item.get("DnsDomain"),item.get("FQDN"),r.get("mdatpDeviceId") or r.get("MdatpDeviceId"),r.get("lastIpAddress") or r.get("LastIpAddress"),r.get("lastExternalIpAddress") or r.get("LastExternalIpAddress")])
+    if hosts: sections.append("### Host Info\n\n"+_table(["Host","Domain","FQDN","MDE Device ID","Last IP","External IP"],hosts))
 
-    hashes = []
-    for item in base.get("FileHashes", []):
-        r = _raw(item); hashes.append([r.get("algorithm") or r.get("Algorithm"), r.get("value") or r.get("Value") or r.get("hashValue")])
-    if hashes:
-        sections.append("### File Hash Info\n\n" + _table(["Algorithm", "Hash"], hashes))
+    hashes=[]
+    for item in base.get("FileHashes",[]):
+        r=_raw(item); hashes.append([r.get("algorithm") or r.get("Algorithm"),r.get("value") or r.get("Value") or r.get("hashValue")])
+    if hashes: sections.append("### File Hash Info\n\n"+_table(["Algorithm","Hash"],hashes))
 
-    files = []
-    for item in base.get("Files", []):
-        r = _raw(item); files.append([r.get("fileName") or r.get("FileName") or r.get("name"), r.get("directory") or r.get("Directory") or r.get("path") or r.get("Path")])
-    if files:
-        sections.append("### File Info\n\n" + _table(["File", "Path"], files))
+    files=[]
+    for item in base.get("Files",[]):
+        r=_raw(item); files.append([r.get("fileName") or r.get("FileName") or r.get("name"),r.get("directory") or r.get("Directory") or r.get("path") or r.get("Path")])
+    if files: sections.append("### File Info\n\n"+_table(["File","Path"],files))
 
-    sections.append("### Enrichment Summary\n\n" + _table(
-        ["Module", "Result"],
-        [["AAD / Identity Risk", f"Highest risk: {aad.get('HighestRiskLevel', 'unknown')}; failed MFA: {aad.get('FailedMFATotalCount', 0)}; fraud: {aad.get('MFAFraudTotalCount', 0)}"],
-         ["Related Alerts", related.get("RelatedAlertsCount", 0)],
-         ["Threat Intelligence", ti.get("MatchedTIItemCount", 0)],
-         ["MDE", mde.get("AnalyzedEntities", mde.get("MachineCount", 0))],
-         ["UEBA", ueba.get("AnomalyCount", 0)],
-         ["File Insights", file_insights.get("HashesLinkedToThreatCount", 0)],
-         ["Defender for Cloud Apps", mcas.get("AnalyzedEntities", mcas.get("MatchedCount", 0))]]))
-
+    sections.append("### Enrichment Summary\n\n"+_table(["Module","Result"],[
+        ["AAD / Identity Risk",f"Highest risk: {aad.get('HighestRiskLevel','unknown')}; failed MFA: {aad.get('FailedMFATotalCount',0)}; fraud: {aad.get('MFAFraudTotalCount',0)}"],
+        ["Related Alerts",related.get("RelatedAlertsCount",0)],["Threat Intelligence",ti.get("MatchedTIItemCount",0)],
+        ["MDE",mde.get("AnalyzedEntities",mde.get("MachineCount",0))],["UEBA",ueba.get("AnomalyCount",0)],
+        ["File Insights",file_insights.get("HashesLinkedToThreatCount",0)],["Defender for Cloud Apps",mcas.get("AnalyzedEntities",mcas.get("MatchedCount",0))]]))
     sections.append("_Generated by STAT Next using the Microsoft Sentinel incident payload and configured enrichment modules._")
-    return {"ModuleName": "STATComment", "Message": "\n\n".join(sections), "RiskScore": score}
+    return {"ModuleName":"STATComment","Message":"\n\n".join(sections),"RiskScore":score}
