@@ -16,6 +16,9 @@ class RelatedAlertsRequest:
 
 SEVERITY={'informational':1,'low':2,'medium':3,'high':4}
 
+def _column_names(columns):
+    return [str(getattr(c,'name',c)) for c in columns]
+
 def _vals(base,key,fields):
     out=[]
     for x in base.get(key,[]):
@@ -39,9 +42,6 @@ def query_related_alerts(req: RelatedAlertsRequest) -> dict[str, Any]:
     if not (accounts or hosts or ips): return _empty()
     current=[str(x) for x in req.base.get('AlertIds',[]) if x]
     q=lambda xs: ','.join("'"+x.replace("'","''")+"'" for x in xs)
-    # Filter the SecurityAlert row before mv-expand.  The old query expanded every
-    # entity from every alert in the lookback window, which can exceed the HTTP action
-    # timeout in busy workspaces.
     query=f'''let Accounts=dynamic([{q(accounts)}]); let Hosts=dynamic([{q(hosts)}]); let IPs=dynamic([{q(ips)}]); let CurrentAlerts=dynamic([{q(current)}]);
 SecurityAlert
 | where TimeGenerated > ago({days}d)
@@ -58,9 +58,9 @@ SecurityAlert
         if result.status==LogsQueryStatus.PARTIAL: return _empty('Related Alerts Log Analytics query returned a partial result')
         rows=[]
         for table in result.tables:
-            names=[c.name for c in table.columns]; rows.extend(dict(zip(names,r)) for r in table.rows)
+            names=_column_names(table.columns); rows.extend(dict(zip(names,r)) for r in table.rows)
     except Exception as exc:
-        return _empty(f'Related Alerts Log Analytics query failed ({type(exc).__name__})')
+        return _empty(f'Related Alerts Log Analytics query failed ({type(exc).__name__}: {str(exc)[:160]})')
     tactics=[]
     for r in rows:
         t=r.get('Tactics') or []
