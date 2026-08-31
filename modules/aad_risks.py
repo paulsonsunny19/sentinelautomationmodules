@@ -25,6 +25,27 @@ def _accounts(base):
         if (upn or uid) and key not in seen:seen.add(key);out.append({'upn':str(upn or ''),'id':str(uid or '')})
     return out
 
+def _mfa_telemetry_query(upn:str,days:int,include_failures:bool=True,include_fraud:bool=True)->str:
+    safe=upn.replace("'","''");parts=[]
+    if include_failures:
+        parts.append(f'''SigninLogs
+| where TimeGenerated >= ago({days}d)
+| where UserPrincipalName =~ '{safe}'
+| where ResultType in ('50074','500121') or (ResultDescription has_any ('MFA','multifactor') and ResultDescription has_any ('denied','timeout'))
+| summarize Count=count()
+| extend Kind='failed'
+| project Kind, Count''')
+    if include_fraud:
+        parts.append(f'''AuditLogs
+| where TimeGenerated >= ago({days}d)
+| where tostring(TargetResources) has '{safe}'
+| where OperationName has_any ('fraud','Fraud') or tostring(AdditionalDetails) has_any ('fraud','Fraud')
+| summarize Count=count()
+| extend Kind='fraud'
+| project Kind, Count''')
+    if not parts:return ''
+    return parts[0] if len(parts)==1 else 'union ' + ', '.join(f'({part})' for part in parts)
+
 def _graph_url(path:str,params:dict[str,str]|None=None)->str:
     return 'https://graph.microsoft.com/v1.0/'+path.lstrip('/')+('?' + urllib.parse.urlencode(params,quote_via=urllib.parse.quote) if params else '')
 def _graph_get(token,url,warnings,label,ignore_http=()):
@@ -83,11 +104,9 @@ def query_aad_risks(req):
         for event in events:all_events.append({'UserPrincipalName':upn,'UserId':uid,**event})
         registration=_graph_registration(token,uid,aw);roles=_graph_roles(token,uid,aw);risk=str(risky.get('riskLevel') or ('none' if risky_ok else 'unknown')).lower();risk='unknown' if risk in ('hidden','unknownfuturevalue') else risk
         if upn and (req.mfa_failure_lookup or req.mfa_fraud_lookup):
-            safe=upn.replace("'","''");parts=[]
-            if req.mfa_failure_lookup:parts.append(f"SigninLogs | where TimeGenerated >= ago({days}d) | where UserPrincipalName =~ '{safe}' | where ResultType in ('50074','500121') or ResultDescription has_any ('MFA','multifactor') and ResultDescription has_any ('denied','timeout') | summarize Kind='failed', Count=count()")
-            if req.mfa_fraud_lookup:parts.append(f"AuditLogs | where TimeGenerated >= ago({days}d) | where tostring(TargetResources) has '{safe}' | where OperationName has_any ('fraud','Fraud') or tostring(AdditionalDetails) has_any ('fraud','Fraud') | summarize Kind='fraud', Count=count()")
+            query=_mfa_telemetry_query(upn,days,req.mfa_failure_lookup,req.mfa_fraud_lookup)
             try:
-                result=logs.query_workspace(req.workspace_id,' union '.join(f'({p})' for p in parts),timespan=timedelta(days=days),server_timeout=20)
+                result=logs.query_workspace(req.workspace_id,query,timespan=timedelta(days=days),server_timeout=20)
                 if result.status==LogsQueryStatus.SUCCESS and result.tables:
                     t=result.tables[0];names=_column_names(t.columns)
                     for row in t.rows:
