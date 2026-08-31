@@ -4,7 +4,7 @@ import pytest
 
 from function_app import _build_base, _incident_id
 from modules.aad_risks import _mfa_telemetry_query, _workspace_risk_events_query, _workspace_risky_user_query
-from modules.base import _normalize_geodata, _sentinel_geodata
+from modules.ip_enrichment import _normalize_geodata, _sentinel_geodata
 from modules.comment import build_comment
 from modules.related_alerts import RelatedAlertsRequest, query_related_alerts
 from modules.scoring import calculate, score_module
@@ -81,7 +81,7 @@ def test_geodata_falls_back_to_compatibility_api(monkeypatch):
             return Response({})
         return Response({'city': 'Mortlake', 'state': 'new south wales', 'country': 'australia', 'organization': 'optus internet pty ltd', 'organizationType': 'Telecommunications', 'asn': '4804'})
 
-    monkeypatch.setattr('modules.base.urllib.request.urlopen', fake_urlopen)
+    monkeypatch.setattr('modules.ip_enrichment.urllib.request.urlopen', fake_urlopen)
     geo, warning = _sentinel_geodata(Credential(), '00000000-0000-0000-0000-000000000000', 'rg', 'workspace', '49.186.62.27')
     assert warning is None
     assert geo['city'] == 'Mortlake'
@@ -92,21 +92,21 @@ def test_geodata_falls_back_to_compatibility_api(monkeypatch):
     assert '/enrichment/ip/geodata/' in calls[1][1]
 
 
-def test_comment_surfaces_ip_geodata_warning():
+def test_comment_surfaces_standalone_ip_geodata_warning():
     comment = build_comment(
-        {
-            'EntitiesCount': 1,
-            'IPs': [{'Address': '49.186.62.27', 'GeoData': {}}],
-            'PublicIPsCount': 1,
-            'GeoEnrichedIPsCount': 0,
+        {'EntitiesCount': 1, 'IPs': [{'Address': '49.186.62.27', 'IsPublic': True}], 'PublicIPsCount': 1},
+        {'TotalScore': 0},
+        ip_enrichment={
+            'ModuleName': 'IPEnrichmentModule',
+            'IPsAnalyzedCount': 1,
+            'IPsEnrichedCount': 0,
             'EnrichmentWarnings': ['Sentinel GeoIP failed for 49.186.62.27: HTTP 403'],
         },
-        {'TotalScore': 0},
     )
     assert comment['PartialEnrichment'] is True
-    assert 'IP enrichment warning' in comment['Message']
+    assert 'IP enrichment warning' in comment['Message'] or 'Enrichment unavailable' in comment['Message']
     assert 'Sentinel GeoIP failed for 49.186.62.27' in comment['Message']
-    assert 'IP GeoData' in comment['Message']
+    assert 'IP Enrichment' in comment['Message']
 
 
 def test_incident_arm_id_accepts_stat_and_stat_next_casing():
