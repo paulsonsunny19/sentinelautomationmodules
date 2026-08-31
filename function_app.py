@@ -16,6 +16,7 @@ from modules.ueba import UEBARequest, query_ueba
 from modules.file_insights import FileInsightsRequest, query_file_insights
 from modules.mcas import MCASRequest, query_mcas
 from modules.ip_baseline import IPBaselineRequest, query_ip_baseline
+from modules.ip_enrichment import IPEnrichmentRequest, query_ip_enrichment
 from modules.oof import OOFRequest, query_oof
 from modules.run_playbook import RunPlaybookRequest, run_playbook
 
@@ -63,7 +64,7 @@ def _run_playbook_request(body):
     return RunPlaybookRequest(body['logicAppResourceId'],body['tenantId'],base.get('IncidentARMId') or base.get('incidentArmId') or '')
 
 @app.route(route='health',methods=['GET'])
-def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','OOFModule','RunPlaybook','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
+def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPEnrichmentModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','OOFModule','RunPlaybook','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
@@ -74,6 +75,8 @@ def stat_aad_risks(req):return execute(req,'stat_aad_risks',('workspaceId','base
 def stat_related_alerts(req):return execute(req,'stat_related_alerts',('workspaceId','base'),lambda b:query_related_alerts(RelatedAlertsRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),b.get('alertKqlFilter',''),bool(b.get('checkAccounts',True)),bool(b.get('checkHosts',True)),bool(b.get('checkIPs',True)))))
 @app.route(route='stat_threat_intel',methods=['POST'])
 def stat_threat_intel(req):return execute(req,'stat_threat_intel',('workspaceId','base'),lambda b:query_threat_intel(ThreatIntelRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),bool(b.get('checkIPs',True)),bool(b.get('checkDomains',True)),bool(b.get('checkURLs',True)),bool(b.get('checkFileHashes',True)))))
+@app.route(route='stat_ip_enrichment',methods=['POST'])
+def stat_ip_enrichment(req):return execute(req,'stat_ip_enrichment',('base',),lambda b:query_ip_enrichment(IPEnrichmentRequest(b['base'])))
 @app.route(route='stat_ip_baseline',methods=['POST'])
 def stat_ip_baseline(req):return execute(req,'stat_ip_baseline',('workspaceId','base'),lambda b:query_ip_baseline(IPBaselineRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',30)))))
 @app.route(route='stat_watchlist',methods=['POST'])
@@ -95,4 +98,4 @@ def stat_run_playbook(req):return execute(req,'stat_run_playbook',('base','logic
 @app.route(route='stat_scoring',methods=['POST'])
 def stat_scoring(req):return execute(req,'stat_scoring',('inputs',),lambda b:calculate(b['inputs']) if isinstance(b['inputs'],list) else (_ for _ in ()).throw(ValueError('inputs must be an array')))
 @app.route(route='stat_comment',methods=['POST'])
-def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('ipBaseline'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas'),b.get('oof')))
+def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('ipEnrichment'),b.get('ipBaseline'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas'),b.get('oof')))
