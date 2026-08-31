@@ -1,5 +1,9 @@
+import json
+
 import pytest
 
+from modules.base import _normalize_geodata, _sentinel_geodata
+from modules.comment import build_comment
 from modules.related_alerts import RelatedAlertsRequest, query_related_alerts
 from modules.scoring import calculate, score_module
 
@@ -46,3 +50,57 @@ def test_calculate_combines_runtime_module_scores():
         {'module': {'ModuleName': 'IPNetworkBaselineModule', 'ScoringData': [{'Score': 5, 'ScoreLabel': 'IP baseline'}]}},
     ])
     assert result['TotalScore'] == 15.0
+
+
+def test_geodata_normalizes_properties_payload():
+    assert _normalize_geodata({'properties': {'city': 'Mortlake', 'country': 'australia', 'asn': '4804'}}) == {
+        'city': 'Mortlake',
+        'country': 'australia',
+        'asn': '4804',
+    }
+
+
+def test_geodata_falls_back_to_compatibility_api(monkeypatch):
+    class Credential:
+        def get_token(self, _scope):
+            return type('Token', (), {'token': 'test-token'})()
+
+    class Response:
+        def __init__(self, payload): self.payload = payload
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return json.dumps(self.payload).encode()
+
+    calls = []
+    def fake_urlopen(request, timeout=15):
+        calls.append((request.get_method(), request.full_url, timeout))
+        if len(calls) == 1:
+            return Response({})
+        return Response({'city': 'Mortlake', 'state': 'new south wales', 'country': 'australia', 'organization': 'optus internet pty ltd', 'organizationType': 'Telecommunications', 'asn': '4804'})
+
+    monkeypatch.setattr('modules.base.urllib.request.urlopen', fake_urlopen)
+    geo, warning = _sentinel_geodata(Credential(), '00000000-0000-0000-0000-000000000000', 'rg', 'workspace', '49.186.62.27')
+    assert warning is None
+    assert geo['city'] == 'Mortlake'
+    assert geo['asn'] == '4804'
+    assert calls[0][0] == 'POST'
+    assert 'listGeodataByIp' in calls[0][1]
+    assert calls[1][0] == 'GET'
+    assert '/enrichment/ip/geodata/' in calls[1][1]
+
+
+def test_comment_surfaces_ip_geodata_warning():
+    comment = build_comment(
+        {
+            'EntitiesCount': 1,
+            'IPs': [{'Address': '49.186.62.27', 'GeoData': {}}],
+            'PublicIPsCount': 1,
+            'GeoEnrichedIPsCount': 0,
+            'EnrichmentWarnings': ['Sentinel GeoIP failed for 49.186.62.27: HTTP 403'],
+        },
+        {'TotalScore': 0},
+    )
+    assert comment['PartialEnrichment'] is True
+    assert 'IP enrichment warning' in comment['Message']
+    assert 'Sentinel GeoIP failed for 49.186.62.27' in comment['Message']
+    assert 'IP GeoData' in comment['Message']
