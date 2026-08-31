@@ -4,7 +4,7 @@ import uuid
 import azure.functions as func
 from modules.base import normalize
 from modules.scoring import calculate
-from modules.comment import build_comment
+from modules.comment_native import build_comment
 from modules.related_alerts import RelatedAlertsRequest, query_related_alerts
 from modules.sentinel import safe_incident_context
 from modules.threat_intel import ThreatIntelRequest, query_threat_intel
@@ -102,6 +102,5 @@ def stat_comment(req):
     return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(
         b['base'], b['scoring'], aad=b.get('aad'), related=b.get('related'), ti=b.get('ti'),
         ip_baseline=b.get('ipBaseline'), mde=b.get('mde'), ueba=b.get('ueba'),
-        file_insights=b.get('file'), mcas=b.get('mcas'), oof=b.get('oof'),
-        ip_enrichment=b.get('ipEnrichment')
+        file_insights=b.get('file'), mcas=b.get('mcas'), oof=b.get('oof')
     ))
