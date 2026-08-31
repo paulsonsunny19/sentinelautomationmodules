@@ -90,7 +90,22 @@ jobs:
           cp function_app.py host.json requirements.txt package-root/
           cp -R modules package-root/
           cp -R .python_packages package-root/
-          (cd package-root && zip -X -r ../artifacts/stat-next.zip . -x '*/__pycache__/*' '*.pyc')
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+          root = Path('package-root')
+          output = Path('artifacts/stat-next.zip')
+          with ZipFile(output, 'w', compression=ZIP_DEFLATED, compresslevel=9) as archive:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or '__pycache__' in path.parts or path.suffix == '.pyc':
+                      continue
+                  name = path.relative_to(root).as_posix()
+                  info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+                  info.compress_type = ZIP_DEFLATED
+                  info.external_attr = (0o644 & 0xFFFF) << 16
+                  archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
+          PY
       - name: Validate deployment ZIP
         run: |
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'function_app.py'
@@ -104,7 +119,7 @@ jobs:
           sha256sum artifacts/stat-next.zip
 
   publish-portal-artifacts:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'stat-next')
+    if: github.event_name == 'push'
     needs: [python, infrastructure, package]
     concurrency:
       group: stat-next-portal-artifacts
@@ -138,7 +153,22 @@ jobs:
             cp function_app.py host.json requirements.txt package-root/
             cp -R modules package-root/
             cp -R .python_packages package-root/
-            (cd package-root && zip -X -r ../artifacts/stat-next.zip . -x '*/__pycache__/*' '*.pyc')
+            python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+          root = Path('package-root')
+          output = Path('artifacts/stat-next.zip')
+          with ZipFile(output, 'w', compression=ZIP_DEFLATED, compresslevel=9) as archive:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or '__pycache__' in path.parts or path.suffix == '.pyc':
+                      continue
+                  name = path.relative_to(root).as_posix()
+                  info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+                  info.compress_type = ZIP_DEFLATED
+                  info.external_attr = (0o644 & 0xFFFF) << 16
+                  archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
+          PY
             sha256sum artifacts/stat-next.zip | tee artifacts/stat-next.zip.sha256
             git add infrastructure/main.json infrastructure/playbook-main.json infrastructure/playbook-activate.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
             if git diff --cached --quiet; then exit 0; fi
