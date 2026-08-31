@@ -47,6 +47,7 @@ jobs:
           python -m json.tool /tmp/main.json >/dev/null
           python -m json.tool /tmp/playbook-main.json >/dev/null
           python -m json.tool /tmp/run-playbook-rbac.json >/dev/null
+          python -m json.tool infrastructure/azuredeploy.json >/dev/null
           python - <<'PY'
           import json
 
@@ -81,9 +82,22 @@ jobs:
           assert policy.get('allowedApplications'), 'Easy Auth must restrict caller application IDs'
           assert policy.get('allowedPrincipals',{}).get('identities'), 'Easy Auth must restrict caller object IDs'
 
+          bootstrap=json.load(open('/tmp/playbook-main.json'))
+          bootstrap_text=json.dumps(bootstrap)
+          assert '3e150937-b8fe-4cfb-8069-0eaf05ecd056' in bootstrap_text, 'Playbook bootstrap must grant Microsoft Sentinel Responder before activation'
+          assert 'playbookPrincipalId' in bootstrap_text, 'Playbook bootstrap must pass its system-assigned principal into workspace RBAC'
+
+          wrapper=json.load(open('infrastructure/azuredeploy.json'))
+          assert wrapper.get('outputs',{}).get('effectiveNamePrefix'), 'Portal core wrapper must output the exact prefix required by later stages'
+          assert wrapper.get('outputs',{}).get('nextStep'), 'Portal core wrapper must tell the deployer how to continue'
+          wrapper_text=json.dumps(wrapper)
+          assert 'artifacts/stat-next.zip' in wrapper_text
+          assert 'infrastructure/main.json' in wrapper_text
+          assert 'infrastructure/playbook-activate.json' in wrapper_text
+
           rbac=json.load(open('/tmp/run-playbook-rbac.json'))
           assert '51d6186e-6489-4900-b93f-92e23144cca5' in json.dumps(rbac)
-          print('Core Easy Auth and RunPlaybook RBAC security contracts are structurally valid')
+          print('Core Easy Auth, staged Portal deployment, Sentinel Responder bootstrap and RunPlaybook RBAC contracts are structurally valid')
           PY
       - name: Validate native STAT activation ARM template
         run: |
