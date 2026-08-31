@@ -1,12 +1,15 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+import sys
 
 
 def _load_runtime_module():
     path = Path(__file__).resolve().parents[1] / 'modules' / 'ip_baseline.py'
-    spec = spec_from_file_location('stat_next_ip_baseline_runtime', path)
+    name = 'stat_next_ip_baseline_runtime'
+    spec = spec_from_file_location(name, path)
     module = module_from_spec(spec)
     assert spec and spec.loader
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
