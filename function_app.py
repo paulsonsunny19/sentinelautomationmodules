@@ -16,6 +16,7 @@ from modules.ueba import UEBARequest, query_ueba
 from modules.file_insights import FileInsightsRequest, query_file_insights
 from modules.mcas import MCASRequest, query_mcas
 from modules.ip_baseline import IPBaselineRequest, query_ip_baseline
+from modules.oof import OOFRequest, query_oof
 
 # HTTP authorization is enforced by App Service Authentication (Easy Auth).
 # Anonymous here means the Functions runtime does not additionally require a
@@ -57,7 +58,7 @@ def _build_base(body):
     return normalize(_trigger_entities(body),incident_id,body['workspaceId'],body.get('tenantId'),body.get('tenantDisplayName'))
 
 @app.route(route='health',methods=['GET'])
-def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
+def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','OOFModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
@@ -82,7 +83,9 @@ def stat_ueba(req):return execute(req,'stat_ueba',('workspaceId','base'),lambda 
 def stat_file(req):return execute(req,'stat_file',('base',),lambda b:query_file_insights(FileInsightsRequest(b['base'])))
 @app.route(route='stat_mcas',methods=['POST'])
 def stat_mcas(req):return execute(req,'stat_mcas',('base',),lambda b:query_mcas(MCASRequest(b['base'],int(b.get('scoreThreshold',0)),b.get('portalUrl'))))
+@app.route(route='stat_oof',methods=['POST'])
+def stat_oof(req):return execute(req,'stat_oof',('base',),lambda b:query_oof(OOFRequest(b['base'])))
 @app.route(route='stat_scoring',methods=['POST'])
 def stat_scoring(req):return execute(req,'stat_scoring',('inputs',),lambda b:calculate(b['inputs']) if isinstance(b['inputs'],list) else (_ for _ in ()).throw(ValueError('inputs must be an array')))
 @app.route(route='stat_comment',methods=['POST'])
-def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('ipBaseline'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas')))
+def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('ipBaseline'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas'),b.get('oof')))
