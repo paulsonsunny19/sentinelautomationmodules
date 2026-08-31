@@ -17,7 +17,7 @@ The deployment keeps these assignments at the narrow resource/workspace scope ra
 
 `modules/aad_risks.py` prefers current Microsoft Sentinel/Log Analytics identity-risk tables first, then uses Microsoft Graph for enrichment that is not present or available in the workspace.
 
-The administrator-reviewed Graph application roles used by the module are:
+The administrator-reviewed Graph application roles used by current identity/OOF enrichment are:
 
 | Application role | Purpose |
 |---|---|
@@ -26,10 +26,13 @@ The administrator-reviewed Graph application roles used by the module are:
 | `IdentityRiskEvent.Read.All` | Read `identityProtection/riskDetections` |
 | `AuditLog.Read.All` | Read authentication-method registration details |
 | `RoleManagement.Read.Directory` | Read directory role assignments and definitions |
+| `MailboxSettings.Read` | Optional `stat_oof` read of `mailboxSettings/automaticRepliesSetting` |
 
-These are read-only application permissions. They are **not** granted automatically by the main ARM/Bicep deployment. A tenant administrator should review and run `infrastructure/grant-api-permissions.ps1` against the Function managed-identity object ID when Graph-backed identity enrichment is required.
+These are read-only application permissions. They are **not** granted automatically by the main ARM/Bicep deployment. A tenant administrator should review and run `infrastructure/grant-api-permissions.ps1` against the Function managed-identity object ID when Graph-backed enrichment is required.
 
-If these tenant permissions are absent, the affected Graph lookups degrade with explicit enrichment warnings; Sentinel-native identity enrichment can still succeed where the corresponding workspace tables are present.
+`stat_oof` is not enabled in the default native triage playbook, specifically so deployments that do not need mailbox automatic-replies context do not depend on `MailboxSettings.Read` at runtime.
+
+If tenant permissions are absent, affected Graph lookups degrade with explicit enrichment warnings; Sentinel-native identity enrichment can still succeed where the corresponding workspace tables are present.
 
 ## Defender profiles
 
