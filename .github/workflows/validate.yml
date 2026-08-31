@@ -114,6 +114,8 @@ jobs:
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/sentinel.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/comment.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/ip_baseline.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/kql_safety.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/oof.py'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/functions/'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/identity/'
           sha256sum artifacts/stat-next.zip
