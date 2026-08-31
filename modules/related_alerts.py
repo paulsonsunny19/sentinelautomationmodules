@@ -46,11 +46,15 @@ def query_related_alerts(req: RelatedAlertsRequest) -> dict[str, Any]:
 SecurityAlert
 | where TimeGenerated > ago({days}d)
 | where SystemAlertId !in (CurrentAlerts)
-| extend EntitiesText=tolower(tostring(Entities))
-| where (array_length(Accounts)>0 and EntitiesText has_any (Accounts)) or (array_length(Hosts)>0 and EntitiesText has_any (Hosts)) or (array_length(IPs)>0 and EntitiesText has_any (IPs))
+| extend EntitiesText=tolower(tostring(Entities)), EntitiesDynamic=todynamic(Entities)
+| mv-apply E=EntitiesDynamic on (
+    extend EType=tolower(tostring(E.Type)), EAddress=tolower(tostring(E.Address))
+    | summarize ExactIPMatch=countif(EType in ('ip','ipaddress') and array_index_of(IPs,EAddress) >= 0) > 0
+)
+| extend AccountEntityMatch=array_length(Accounts)>0 and EntitiesText has_any (Accounts), HostEntityMatch=array_length(Hosts)>0 and EntitiesText has_any (Hosts), IPEntityMatch=array_length(IPs)>0 and ExactIPMatch
+| where AccountEntityMatch or HostEntityMatch or IPEntityMatch
 | summarize arg_max(TimeGenerated, *) by SystemAlertId
 {req.alert_kql_filter}
-| extend AccountEntityMatch=array_length(Accounts)>0 and EntitiesText has_any (Accounts), HostEntityMatch=array_length(Hosts)>0 and EntitiesText has_any (Hosts), IPEntityMatch=array_length(IPs)>0 and EntitiesText has_any (IPs)
 | project SystemAlertId, AccountEntityMatch, HostEntityMatch, IPEntityMatch, StartTime, DisplayName=AlertName, AlertSeverity, ProviderName, Tactics
 | take 200'''
     try:
