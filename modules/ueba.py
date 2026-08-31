@@ -22,6 +22,17 @@ def _upns(base: dict[str,Any])->list[str]:
         if v: out.append(str(v))
     return list(dict.fromkeys(out))
 
+def _quoted_upns(upns:list[str])->str:
+    return ','.join("'"+x.replace("'","''")+"'" for x in upns)
+
+def _anomaly_query(upns:list[str],days:int)->str:
+    quoted=_quoted_upns(upns)
+    return f'''let UPNs=dynamic([{quoted}]);
+Anomalies
+| where TimeGenerated >= ago({days}d)
+| where UserPrincipalName in~ (UPNs) or tostring(Entities) has_any ({quoted})
+| summarize AnomalyCount=dcount(Id), AnomalyTactics=make_set(Tactics,100)'''
+
 def _empty(warnings=None)->dict[str,Any]:
     result={'AllEntityEventCount':0,'AllEntityInvestigationPriorityAverage':0,'AllEntityInvestigationPriorityMax':0,'AllEntityInvestigationPrioritySum':0,'AnomalyCount':0,'AnomalyTactics':[],'AnomalyTacticsCount':0,'DetailedResults':[],'InvestigationPrioritiesFound':False,'ModuleName':'UEBAModule','ThreatIntelFound':False,'ThreatIntelMatchCount':0}
     if warnings: result['EnrichmentWarnings']=warnings
@@ -30,7 +41,7 @@ def _empty(warnings=None)->dict[str,Any]:
 def query_ueba(req:UEBARequest)->dict[str,Any]:
     upns=_upns(req.base); days=max(1,min(int(req.lookback_days),30)); minimum=max(1,min(int(req.minimum_investigation_priority),10))
     if not upns: return _empty()
-    quoted=','.join("'"+x.replace("'","''")+"'" for x in upns); warnings=[]
+    quoted=_quoted_upns(upns); warnings=[]
     query=f'''let UPNs=dynamic([{quoted}]);
 BehaviorAnalytics
 | where TimeGenerated >= ago({days}d)
@@ -48,12 +59,8 @@ BehaviorAnalytics
         elif result.status==LogsQueryStatus.PARTIAL: warnings.append('UEBA BehaviorAnalytics query returned a partial result')
     except Exception as exc: warnings.append(f'UEBA BehaviorAnalytics query failed ({type(exc).__name__}: {str(exc)[:160]})')
     anomaly_count=0; tactics=[]
-    anomaly_query=f'''Anomalies
-| where TimeGenerated >= ago({days}d)
-| where tostring(Entities) has_any ({quoted})
-| summarize AnomalyCount=dcount(AnomalyId), AnomalyTactics=make_set(Tactics,100)'''
     try:
-        ar=client.query_workspace(req.workspace_id,anomaly_query,timespan=timedelta(days=days),server_timeout=20)
+        ar=client.query_workspace(req.workspace_id,_anomaly_query(upns,days),timespan=timedelta(days=days),server_timeout=20)
         if ar.status==LogsQueryStatus.SUCCESS and ar.tables and ar.tables[0].rows:
             names=_column_names(ar.tables[0].columns); d=dict(zip(names,ar.tables[0].rows[0])); anomaly_count=int(d.get('AnomalyCount') or 0)
             raw=d.get('AnomalyTactics') or []
