@@ -17,6 +17,7 @@ from modules.file_insights import FileInsightsRequest, query_file_insights
 from modules.mcas import MCASRequest, query_mcas
 from modules.ip_baseline import IPBaselineRequest, query_ip_baseline
 from modules.oof import OOFRequest, query_oof
+from modules.run_playbook import RunPlaybookRequest, run_playbook
 
 # HTTP authorization is enforced by App Service Authentication (Easy Auth).
 # Anonymous here means the Functions runtime does not additionally require a
@@ -57,8 +58,12 @@ def _build_base(body):
         raise ValueError('incidentArmId is required for stat_base; send the full Microsoft Sentinel incident ARM resource ID')
     return normalize(_trigger_entities(body),incident_id,body['workspaceId'],body.get('tenantId'),body.get('tenantDisplayName'))
 
+def _run_playbook_request(body):
+    base=body.get('base') if isinstance(body.get('base'),dict) else {}
+    return RunPlaybookRequest(body['logicAppResourceId'],body['tenantId'],base.get('IncidentARMId') or base.get('incidentArmId') or '')
+
 @app.route(route='health',methods=['GET'])
-def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','OOFModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
+def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','OOFModule','RunPlaybook','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
@@ -85,6 +90,8 @@ def stat_file(req):return execute(req,'stat_file',('base',),lambda b:query_file_
 def stat_mcas(req):return execute(req,'stat_mcas',('base',),lambda b:query_mcas(MCASRequest(b['base'],int(b.get('scoreThreshold',0)),b.get('portalUrl'))))
 @app.route(route='stat_oof',methods=['POST'])
 def stat_oof(req):return execute(req,'stat_oof',('base',),lambda b:query_oof(OOFRequest(b['base'])))
+@app.route(route='stat_run_playbook',methods=['POST'])
+def stat_run_playbook(req):return execute(req,'stat_run_playbook',('base','logicAppResourceId','tenantId'),lambda b:run_playbook(_run_playbook_request(b)))
 @app.route(route='stat_scoring',methods=['POST'])
 def stat_scoring(req):return execute(req,'stat_scoring',('inputs',),lambda b:calculate(b['inputs']) if isinstance(b['inputs'],list) else (_ for _ in ()).throw(ValueError('inputs must be an array')))
 @app.route(route='stat_comment',methods=['POST'])
