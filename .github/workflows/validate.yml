@@ -42,17 +42,42 @@ jobs:
         run: az bicep build --file infrastructure/playbook-main.bicep --outfile /tmp/playbook-main.json
       - name: Compile RunPlaybook RBAC module
         run: az bicep build --file infrastructure/run-playbook-rbac.bicep --outfile /tmp/run-playbook-rbac.json
-      - name: Validate generated ARM JSON
+      - name: Validate generated ARM JSON and Function Easy Auth
         run: |
           python -m json.tool /tmp/main.json >/dev/null
           python -m json.tool /tmp/playbook-main.json >/dev/null
           python -m json.tool /tmp/run-playbook-rbac.json >/dev/null
           python - <<'PY'
           import json
-          d=json.load(open('/tmp/run-playbook-rbac.json'))
-          text=json.dumps(d)
-          assert '51d6186e-6489-4900-b93f-92e23144cca5' in text
-          print('RunPlaybook RBAC is scoped to Microsoft Sentinel Playbook Operator')
+
+          core=json.load(open('/tmp/main.json'))
+          resources=core.get('resources',[])
+          uami=[r for r in resources if r.get('type')=='Microsoft.ManagedIdentity/userAssignedIdentities' and 'api-caller' in json.dumps(r.get('name'))]
+          assert len(uami)==1, 'Core template must create one dedicated STAT API caller identity'
+
+          auth=next((r for r in resources if r.get('type')=='Microsoft.Web/sites/config' and 'authsettingsV2' in json.dumps(r.get('name'))),None)
+          assert auth, 'Function authsettingsV2 is required; anonymous Function routes must never be internet-trusted directly'
+          props=auth['properties']
+          assert props['platform']['enabled'] is True
+          assert props['globalValidation']['requireAuthentication'] is True
+          assert props['globalValidation']['unauthenticatedClientAction']=='Return401'
+          assert props['httpSettings']['requireHttps'] is True
+          assert props['login']['tokenStore']['enabled'] is False
+          aad=props['identityProviders']['azureActiveDirectory']
+          assert aad['enabled'] is True
+          registration=aad['registration']
+          assert 'clientId' in registration and registration['clientId']
+          assert str(registration['openIdIssuer']).startswith('[format(\'https://sts.windows.net/') or 'sts.windows.net' in str(registration['openIdIssuer'])
+          assert 'clientSecretSettingName' not in registration
+          validation=aad['validation']
+          assert validation.get('allowedAudiences'), 'Easy Auth must explicitly restrict token audiences'
+          policy=validation['defaultAuthorizationPolicy']
+          assert policy.get('allowedApplications'), 'Easy Auth must restrict caller application IDs'
+          assert policy.get('allowedPrincipals',{}).get('identities'), 'Easy Auth must restrict caller object IDs'
+
+          rbac=json.load(open('/tmp/run-playbook-rbac.json'))
+          assert '51d6186e-6489-4900-b93f-92e23144cca5' in json.dumps(rbac)
+          print('Core Easy Auth and RunPlaybook RBAC security contracts are structurally valid')
           PY
       - name: Validate native STAT activation ARM template
         run: |
@@ -62,11 +87,14 @@ jobs:
           d=json.load(open('infrastructure/playbook-activate.json'))
           assert d.get('$schema','').endswith('/deploymentTemplate.json#')
           assert 'tenantId' in d.get('parameters', {})
+          assert 'statApiAudience' not in d.get('parameters', {}), 'Native playbook must derive the protected API audience from the core caller identity'
           wf=next(r for r in d.get('resources',[]) if r.get('type')=='Microsoft.Logic/workflows')
+          identity=wf.get('identity',{})
+          assert identity.get('type')=='SystemAssigned, UserAssigned'
+          assert "[variables('apiCallerIdentityResourceId')]" in identity.get('userAssignedIdentities',{})
           definition=wf['properties']['definition']; actions=definition['actions']
           required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','IP_Network_Baseline','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','Build_STAT_Comment','High_Risk'}
           missing=required-set(actions); assert not missing, f'Missing STAT actions: {sorted(missing)}'
-          assert wf.get('identity',{}).get('type')=='SystemAssigned'
           trigger=definition['triggers']['Microsoft_Sentinel_incident']
           assert trigger['type']=='ApiConnectionWebhook'
           assert trigger['inputs']['host']['connection']['name']=="@parameters('$connections')['azuresentinel']['connectionId']"
@@ -78,11 +106,18 @@ jobs:
           assert base_body['incidentArmId']=="@triggerBody()?['object']?['id']"
           assert 'entities' not in base_body
           assert actions['Build_STAT_Base']['runAfter']=={}
+          http_actions=[a for a in actions.values() if a.get('type')=='Http']
+          assert http_actions, 'Native playbook must call the STAT API through authenticated HTTP actions'
+          for action in http_actions:
+              auth=action['inputs'].get('authentication',{})
+              assert auth.get('type')=='ManagedServiceIdentity'
+              assert auth.get('identity')=="[variables('apiCallerIdentityResourceId')]"
+              assert 'apiCallerIdentityResourceId' in str(auth.get('audience')) and '.clientId]' in str(auth.get('audience'))
           assert actions['Build_STAT_Comment']['inputs']['uri'].endswith("/stat_comment')]")
           assert actions['High_Risk']['runAfter']=={'Build_STAT_Comment':['Succeeded']}
           high=actions['High_Risk']['actions']; low=actions['High_Risk']['else']['actions']
           assert 'Add_STAT_High_Risk_Comment' in high and 'Add_STAT_Low_Risk_Comment' in low
-          print('Native Sentinel full-trigger, incident-id and rich-comment contract is structurally valid')
+          print('Native Sentinel trigger, incident scope, UAMI API authentication and rich-comment contract is structurally valid')
           PY
 
   package:
