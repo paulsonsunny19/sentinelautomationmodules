@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+local.settings.json
+*.zip
+!artifacts/stat-next.zip
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store

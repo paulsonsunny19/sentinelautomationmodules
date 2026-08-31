@@ -1,15 +1,52 @@
-# Sentinel Automation Modules
+# STAT Next
 
-Azure deployment-compatible fork of briandelmsft/SentinelAutomationModules.
+A secure-by-default modernization of the Microsoft Sentinel Triage AssistanT concept.
 
-This fork addresses the Linux Consumption Function App restriction that prevents `WEBSITE_RUN_FROM_PACKAGE` from using redirecting GitHub Release URLs.
+STAT Next is a new implementation rather than a deployment wrapper around the legacy STAT Function package.
 
-## Deployment package fix
+## Design goals
 
-Use a direct Azure Blob Storage URL (normally a read-only Blob SAS URL) for `FunctionPackage`, for example:
+- System Assigned Managed Identity for runtime authentication.
+- No application client secrets.
+- No GitHub-release `WEBSITE_RUN_FROM_PACKAGE` bootstrap chain at runtime.
+- Least-privilege, module-specific permissions.
+- Native Microsoft Sentinel and Log Analytics enrichment first.
+- Microsoft Graph / Entra / Defender integrations remain explicit permission profiles.
+- HTTPS only, TLS 1.2+, basic publishing disabled.
+- Infrastructure as code using Bicep/ARM.
+- Ready-to-run Function package validated and published by CI.
+- Structured JSON responses with correlation IDs and auditable module execution.
 
-```
-https://<account>.blob.core.windows.net/<container>/stat.zip?<SAS>
-```
+## Current API surface
 
-Source: https://github.com/briandelmsft/SentinelAutomationModules
+| Route | Purpose |
+|---|---|
+| `health` | Service/module health |
+| `incident_context` | Microsoft Sentinel incident, alert and entity context |
+| `stat_base` | Normalize incident entities and enrich public IPs with Sentinel GeoData |
+| `stat_aad_risks` | Sentinel/Entra identity risk, registration, role and MFA context |
+| `stat_related_alerts` | Related-alert correlation with exact structured IP matching |
+| `stat_threat_intel` | Sentinel threat-intelligence correlation |
+| `stat_ip_baseline` | `DeviceNetworkEvents` IP prevalence/baseline context |
+| `stat_watchlist` | Sentinel watchlist correlation |
+| `stat_kql` | Explicit free-form KQL enrichment endpoint with safety guards |
+| `stat_mde` | Microsoft Defender for Endpoint context |
+| `stat_ueba` | Sentinel UEBA / anomaly context |
+| `stat_file` | File/hash enrichment |
+| `stat_mcas` | Defender for Cloud Apps compatibility enrichment |
+| `stat_oof` | Optional Microsoft Graph automatic-replies / out-of-office enrichment |
+| `stat_run_playbook` | Optional exact-allow-listed start of a compatible Consumption Logic App Request/manual trigger |
+| `stat_scoring` | Aggregate module scoring |
+| `stat_comment` | Build the rich analyst-facing Sentinel incident comment |
+
+The native activation playbook passes the complete Sentinel trigger plus an explicit `incidentArmId` into `stat_base`. Missing incident ARM scope is rejected instead of silently skipping GeoIP enrichment.
+
+`stat_oof` is available for custom/extended playbooks but is intentionally **not** called by the default native triage playbook. It requires the read-only Microsoft Graph application permission `MailboxSettings.Read`, so deployments that do not need OOF enrichment do not incur that runtime dependency or 403 noise.
+
+`stat_run_playbook` is also **disabled by default**. Enabling it requires a comma-separated list of exact Consumption Logic App resource IDs in `runPlaybookAllowedResourceIds`. The deployment then grants the Function managed identity Microsoft Sentinel Playbook Operator only on the configured playbook resource group. The module uses that role to obtain the `manual` trigger callback URL from Azure Resource Manager, then sends only the current `IncidentARMId` to the signed callback. Prefix matching and unrestricted fallback behavior are intentionally not supported.
+
+## Deployment notes
+
+The Function package is staged into private Azure Storage during deployment and loaded with managed identity. Tenant-wide API permissions are **not** created silently by the ARM deployment. When Graph/Defender enrichment is required, a tenant administrator should review and run `infrastructure/grant-api-permissions.ps1` for the Function managed identity.
+
+See `docs/ARCHITECTURE.md`, `docs/PERMISSIONS.md`, `docs/SECURITY.md`, and `infrastructure/PORTAL-DEPLOYMENT.md`.

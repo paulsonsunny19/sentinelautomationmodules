@@ -1,0 +1,251 @@
+name: Validate STAT Next
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'modules/**'
+      - 'function_app.py'
+      - 'requirements.txt'
+      - 'infrastructure/**'
+      - 'tests/**'
+      - 'host.json'
+      - '.github/workflows/validate.yml'
+  push:
+    branches: [stat-next]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest
+      - run: pytest -q
+      - run: python -m compileall -q function_app.py modules
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: az bicep install
+      - name: Compile core template
+        run: az bicep build --file infrastructure/main.bicep --outfile /tmp/main.json
+      - name: Compile playbook bootstrap template
+        run: az bicep build --file infrastructure/playbook-main.bicep --outfile /tmp/playbook-main.json
+      - name: Compile RunPlaybook RBAC module
+        run: az bicep build --file infrastructure/run-playbook-rbac.bicep --outfile /tmp/run-playbook-rbac.json
+      - name: Validate generated ARM JSON and Function Easy Auth
+        run: |
+          python -m json.tool /tmp/main.json >/dev/null
+          python -m json.tool /tmp/playbook-main.json >/dev/null
+          python -m json.tool /tmp/run-playbook-rbac.json >/dev/null
+          python -m json.tool infrastructure/azuredeploy.json >/dev/null
+          python - <<'PY'
+          import json
+
+          core=json.load(open('/tmp/main.json'))
+          resources=core.get('resources',[])
+          variables=core.get('variables',{})
+          assert 'apiCallerIdentityName' in variables, 'Core template must define the dedicated STAT API caller identity name'
+          assert variables.get('statApiAudience') == 'https://management.azure.com/', 'STAT API audience must be a token resource that managed identities can request'
+          uami=[
+              r for r in resources
+              if r.get('type')=='Microsoft.ManagedIdentity/userAssignedIdentities'
+              and r.get('name')=="[variables('apiCallerIdentityName')]"
+          ]
+          assert len(uami)==1, 'Core template must create one dedicated STAT API caller identity'
+
+          auth=next((r for r in resources if r.get('type')=='Microsoft.Web/sites/config' and 'authsettingsV2' in json.dumps(r.get('name'))),None)
+          assert auth, 'Function authsettingsV2 is required; anonymous Function routes must never be internet-trusted directly'
+          props=auth['properties']
+          assert props['platform']['enabled'] is True
+          assert props['globalValidation']['requireAuthentication'] is True
+          assert props['globalValidation']['unauthenticatedClientAction']=='Return401'
+          assert props['httpSettings']['requireHttps'] is True
+          assert props['login']['tokenStore']['enabled'] is False
+          aad=props['identityProviders']['azureActiveDirectory']
+          assert aad['enabled'] is True
+          registration=aad['registration']
+          assert 'clientId' in registration and registration['clientId']
+          assert str(registration['openIdIssuer']).startswith('[format(\'https://sts.windows.net/') or 'sts.windows.net' in str(registration['openIdIssuer'])
+          assert 'clientSecretSettingName' not in registration
+          validation=aad['validation']
+          assert validation.get('allowedAudiences') == ["[variables('statApiAudience')]"], 'Easy Auth must accept only the configured target token audience'
+          policy=validation['defaultAuthorizationPolicy']
+          assert policy.get('allowedApplications'), 'Easy Auth must restrict caller application IDs'
+          assert policy.get('allowedPrincipals',{}).get('identities'), 'Easy Auth must restrict caller object IDs'
+
+          bootstrap=json.load(open('/tmp/playbook-main.json'))
+          bootstrap_text=json.dumps(bootstrap)
+          assert '3e150937-b8fe-4cfb-8069-0eaf05ecd056' in bootstrap_text, 'Playbook bootstrap must grant Microsoft Sentinel Responder before activation'
+          assert 'playbookPrincipalId' in bootstrap_text, 'Playbook bootstrap must pass its system-assigned principal into workspace RBAC'
+
+          wrapper=json.load(open('infrastructure/azuredeploy.json'))
+          assert wrapper.get('outputs',{}).get('effectiveNamePrefix'), 'Portal core wrapper must output the exact prefix required by later stages'
+          assert wrapper.get('outputs',{}).get('nextStep'), 'Portal core wrapper must tell the deployer how to continue'
+          wrapper_text=json.dumps(wrapper)
+          assert 'artifacts/stat-next.zip' in wrapper_text
+          assert 'infrastructure/main.json' in wrapper_text
+          assert 'infrastructure/playbook-activate.json' in wrapper_text
+
+          rbac=json.load(open('/tmp/run-playbook-rbac.json'))
+          assert '51d6186e-6489-4900-b93f-92e23144cca5' in json.dumps(rbac)
+          print('Core Easy Auth, managed-identity audience, staged Portal deployment, Sentinel Responder bootstrap and RunPlaybook RBAC contracts are structurally valid')
+          PY
+      - name: Validate native STAT activation ARM template
+        run: |
+          python -m json.tool infrastructure/playbook-activate.json >/dev/null
+          python - <<'PY'
+          import json
+          d=json.load(open('infrastructure/playbook-activate.json'))
+          assert d.get('$schema','').endswith('/deploymentTemplate.json#')
+          assert 'tenantId' in d.get('parameters', {})
+          assert 'statApiAudience' not in d.get('parameters', {}), 'Native playbook must not accept a caller-controlled API audience'
+          assert d.get('variables',{}).get('statApiAudience')=='https://management.azure.com/'
+          wf=next(r for r in d.get('resources',[]) if r.get('type')=='Microsoft.Logic/workflows')
+          identity=wf.get('identity',{})
+          assert identity.get('type')=='SystemAssigned, UserAssigned'
+          assert "[variables('apiCallerIdentityResourceId')]" in identity.get('userAssignedIdentities',{})
+          definition=wf['properties']['definition']; actions=definition['actions']
+          required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','IP_Network_Baseline','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','Build_STAT_Comment','High_Risk'}
+          missing=required-set(actions); assert not missing, f'Missing STAT actions: {sorted(missing)}'
+          trigger=definition['triggers']['Microsoft_Sentinel_incident']
+          assert trigger['type']=='ApiConnectionWebhook'
+          assert trigger['inputs']['host']['connection']['name']=="@parameters('$connections')['azuresentinel']['connectionId']"
+          assert trigger['inputs']['body']['callback_url']=='@{listCallbackUrl()}'
+          assert trigger['inputs']['path']=='/incident-creation'
+          base_body=actions['Build_STAT_Base']['inputs']['body']
+          assert base_body['tenantId']=="[parameters('tenantId')]"
+          assert base_body['Body']=='@triggerBody()'
+          assert base_body['incidentArmId']=="@triggerBody()?['object']?['id']"
+          assert 'entities' not in base_body
+          assert actions['Build_STAT_Base']['runAfter']=={}
+          http_actions=[a for a in actions.values() if a.get('type')=='Http']
+          assert http_actions, 'Native playbook must call the STAT API through authenticated HTTP actions'
+          for action in http_actions:
+              auth=action['inputs'].get('authentication',{})
+              assert auth.get('type')=='ManagedServiceIdentity'
+              assert auth.get('identity')=="[variables('apiCallerIdentityResourceId')]"
+              assert auth.get('audience')=="[variables('statApiAudience')]"
+          assert actions['Build_STAT_Comment']['inputs']['uri'].endswith("/stat_comment')]")
+          assert actions['High_Risk']['runAfter']=={'Build_STAT_Comment':['Succeeded']}
+          high=actions['High_Risk']['actions']; low=actions['High_Risk']['else']['actions']
+          assert 'Add_STAT_High_Risk_Comment' in high and 'Add_STAT_Low_Risk_Comment' in low
+          print('Native Sentinel trigger, incident scope, UAMI caller identity, target audience and rich-comment contract is structurally valid')
+          PY
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build ready-to-run Linux Consumption ZIP
+        run: |
+          rm -rf .python_packages package-root
+          mkdir -p .python_packages/lib/site-packages package-root/modules artifacts
+          pip install --disable-pip-version-check --no-compile -r requirements.txt --target .python_packages/lib/site-packages
+          cp function_app.py host.json requirements.txt package-root/
+          cp -R modules package-root/
+          cp -R .python_packages package-root/
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+          root = Path('package-root')
+          output = Path('artifacts/stat-next.zip')
+          with ZipFile(output, 'w', compression=ZIP_DEFLATED, compresslevel=9) as archive:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or '__pycache__' in path.parts or path.suffix == '.pyc':
+                      continue
+                  name = path.relative_to(root).as_posix()
+                  info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+                  info.compress_type = ZIP_DEFLATED
+                  info.external_attr = (0o644 & 0xFFFF) << 16
+                  archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
+          PY
+      - name: Validate deployment ZIP
+        run: |
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'function_app.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'host.json'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'requirements.txt'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/sentinel.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/comment.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/ip_baseline.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/kql_safety.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/oof.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/run_playbook.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/functions/'
+          unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/identity/'
+          sha256sum artifacts/stat-next.zip
+
+  publish-portal-artifacts:
+    if: github.event_name == 'push'
+    needs: [python, infrastructure, package]
+    concurrency:
+      group: stat-next-portal-artifacts
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stat-next
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and publish stable Portal artifacts
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          az bicep install
+          for attempt in 1 2 3; do
+            git fetch origin stat-next
+            git reset --hard origin/stat-next
+            git clean -fdx
+            az bicep build --file infrastructure/main.bicep --outfile infrastructure/main.json
+            az bicep build --file infrastructure/playbook-main.bicep --outfile infrastructure/playbook-main.json
+            python -m json.tool infrastructure/playbook-activate.json >/dev/null
+            mkdir -p .python_packages/lib/site-packages package-root/modules artifacts
+            pip install --disable-pip-version-check --no-compile -r requirements.txt --target .python_packages/lib/site-packages
+            cp function_app.py host.json requirements.txt package-root/
+            cp -R modules package-root/
+            cp -R .python_packages package-root/
+            python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+          root = Path('package-root')
+          output = Path('artifacts/stat-next.zip')
+          with ZipFile(output, 'w', compression=ZIP_DEFLATED, compresslevel=9) as archive:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or '__pycache__' in path.parts or path.suffix == '.pyc':
+                      continue
+                  name = path.relative_to(root).as_posix()
+                  info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+                  info.compress_type = ZIP_DEFLATED
+                  info.external_attr = (0o644 & 0xFFFF) << 16
+                  archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
+          PY
+            sha256sum artifacts/stat-next.zip | tee artifacts/stat-next.zip.sha256
+            git add infrastructure/main.json infrastructure/playbook-main.json infrastructure/playbook-activate.json artifacts/stat-next.zip artifacts/stat-next.zip.sha256
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m 'Publish validated STAT Next Portal artifacts [skip ci]'
+            if git push origin HEAD:stat-next; then exit 0; fi
+            echo "Remote changed during publish attempt $attempt; rebuilding from latest tip."
+            sleep $((attempt * 2))
+          done
+          echo 'Failed to publish artifacts after 3 clean rebuild attempts.' >&2
+          exit 1

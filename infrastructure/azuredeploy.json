@@ -1,0 +1,44 @@
+{
+  "$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion":"0.3.0.0",
+  "parameters": {
+    "namePrefix":{
+      "type":"string",
+      "defaultValue":"statnext",
+      "minLength":5,
+      "metadata":{"description":"Human-readable STAT Next prefix. A deterministic suffix is added automatically so Azure resource names are unique."}
+    },
+    "sentinelResourceGroup":{"type":"string","metadata":{"description":"Resource group containing the Microsoft Sentinel Log Analytics workspace."}},
+    "sentinelWorkspaceName":{"type":"string","metadata":{"description":"Log Analytics workspace with Microsoft Sentinel enabled."}},
+    "sentinelSubscriptionId":{"type":"string","defaultValue":"[subscription().subscriptionId]","metadata":{"description":"Subscription containing the Microsoft Sentinel workspace."}}
+  },
+  "variables": {
+    "effectiveNamePrefix":"[concat(parameters('namePrefix'),uniqueString(resourceGroup().id))]",
+    "packageUri":"https://raw.githubusercontent.com/paulsonsunny19/sentinelautomationmodules/stat-next/artifacts/stat-next.zip",
+    "coreTemplateUri":"https://raw.githubusercontent.com/paulsonsunny19/sentinelautomationmodules/stat-next/infrastructure/main.json",
+    "activationTemplateUri":"https://raw.githubusercontent.com/paulsonsunny19/sentinelautomationmodules/stat-next/infrastructure/playbook-activate.json"
+  },
+  "resources":[{
+    "type":"Microsoft.Resources/deployments",
+    "apiVersion":"2022-09-01",
+    "name":"STATNextCore",
+    "properties":{
+      "mode":"Incremental",
+      "templateLink":{"uri":"[variables('coreTemplateUri')]"},
+      "parameters":{
+        "namePrefix":{"value":"[variables('effectiveNamePrefix')]"},
+        "sentinelSubscriptionId":{"value":"[parameters('sentinelSubscriptionId')]"},
+        "sentinelResourceGroup":{"value":"[parameters('sentinelResourceGroup')]"},
+        "sentinelWorkspaceName":{"value":"[parameters('sentinelWorkspaceName')]"},
+        "packageUri":{"value":"[variables('packageUri')]"}
+      }
+    }
+  }],
+  "outputs":{
+    "effectiveNamePrefix":{"type":"string","value":"[variables('effectiveNamePrefix')]"},
+    "functionName":{"type":"string","value":"[concat(variables('effectiveNamePrefix'),'-api')]"},
+    "apiCallerIdentityName":{"type":"string","value":"[concat(take(variables('effectiveNamePrefix'),45),'-api-caller')]"},
+    "activationTemplateUri":{"type":"string","value":"[variables('activationTemplateUri')]"},
+    "nextStep":{"type":"string","value":"Deploy the native activation template in this same resource group. Use effectiveNamePrefix exactly as the activation template namePrefix."}
+  }
+}

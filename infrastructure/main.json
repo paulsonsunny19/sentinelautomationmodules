@@ -1,0 +1,601 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "2396903106697805051"
+    }
+  },
+  "parameters": {
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "[format('statnext{0}', uniqueString(resourceGroup().id))]",
+      "minLength": 5,
+      "metadata": {
+        "description": "Globally unique base name for STAT Next resources."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "sentinelSubscriptionId": {
+      "type": "string",
+      "defaultValue": "[subscription().subscriptionId]",
+      "metadata": {
+        "description": "Subscription containing the Sentinel workspace."
+      }
+    },
+    "sentinelResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group containing the Sentinel workspace."
+      }
+    },
+    "sentinelWorkspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Log Analytics workspace used by Microsoft Sentinel."
+      }
+    },
+    "packageUri": {
+      "type": "string",
+      "metadata": {
+        "description": "Public source URL used only to stage the validated package into private Azure Blob Storage."
+      }
+    },
+    "packageDeploymentId": {
+      "type": "string",
+      "defaultValue": "[utcNow('yyyyMMddHHmmss')]",
+      "metadata": {
+        "description": "Deployment nonce used to force a fresh package download. Leave the default for a new deployment; change it for an intentional package refresh."
+      }
+    },
+    "defenderCloudAppsApiUrl": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional tenant-specific Defender for Cloud Apps API/portal URL from Defender portal > Settings > Cloud Apps > System > About. Leave empty to deploy MDCA in ConfigurationRequired mode."
+      }
+    },
+    "runPlaybookAllowedResourceIds": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Comma-separated exact Consumption Logic App resource IDs allowed for stat_run_playbook. Empty disables RunPlaybook."
+      }
+    },
+    "runPlaybookSubscriptionId": {
+      "type": "string",
+      "defaultValue": "[parameters('sentinelSubscriptionId')]",
+      "metadata": {
+        "description": "Subscription containing the allow-listed RunPlaybook Logic Apps. Playbook Operator is granted only when RunPlaybook is enabled."
+      }
+    },
+    "runPlaybookResourceGroup": {
+      "type": "string",
+      "defaultValue": "[parameters('sentinelResourceGroup')]",
+      "metadata": {
+        "description": "Single resource group containing the allow-listed RunPlaybook Logic Apps. Keep the exact allow-list limited to workflows in this resource group."
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "{\n  \"version\": \"Notebook/1.0\",\n  \"items\": [\n    {\n      \"type\": 1,\n      \"content\": {\n        \"json\": \"# STAT Next - Status\\nSecure-by-default operational workbook for Sentinel Triage AssistanT Next. Use the tabs below to review deployment health, telemetry and versions.\"\n      },\n      \"name\": \"Title\"\n    },\n    {\n      \"type\": 11,\n      \"content\": {\n        \"version\": \"LinkItem/1.0\",\n        \"style\": \"tabs\",\n        \"links\": [\n          {\"cellValue\":\"ActiveTab\",\"linkTarget\":\"parameter\",\"linkLabel\":\"Statistics\",\"subTarget\":\"Statistics\",\"style\":\"link\"},\n          {\"cellValue\":\"ActiveTab\",\"linkTarget\":\"parameter\",\"linkLabel\":\"Health\",\"subTarget\":\"Health\",\"style\":\"link\"},\n          {\"cellValue\":\"ActiveTab\",\"linkTarget\":\"parameter\",\"linkLabel\":\"Versions\",\"subTarget\":\"Versions\",\"style\":\"link\"}\n        ]\n      },\n      \"name\": \"Tabs Menu\"\n    },\n    {\n      \"type\": 9,\n      \"content\": {\n        \"version\": \"KqlParameterItem/1.0\",\n        \"parameters\": [\n          {\"name\":\"ActiveTab\",\"type\":1,\"isRequired\":true,\"value\":\"Statistics\",\"typeSettings\":{\"additionalResourceOptions\":[]}},\n          {\"name\":\"TimeRange\",\"label\":\"Filter time range\",\"type\":4,\"value\":{\"durationMs\":604800000}},\n          {\"name\":\"Workspace\",\"label\":\"Sentinel workspace\",\"type\":5,\"isRequired\":true,\"query\":\"resources | where type =~ 'microsoft.operationalinsights/workspaces' | project id, name\",\"queryType\":1,\"resourceType\":\"microsoft.resourcegraph/resources\",\"defaultValue\":\"value::1\"},\n          {\"name\":\"FunctionApp\",\"label\":\"STAT Next Function\",\"type\":5,\"isRequired\":true,\"query\":\"resources | where type =~ 'microsoft.web/sites' | where kind has 'functionapp' | where name startswith 'statnext' or tags['ProjectName'] =~ 'STATNext' | project id, name\",\"queryType\":1,\"resourceType\":\"microsoft.resourcegraph/resources\",\"defaultValue\":\"value::1\"}\n        ],\n        \"style\": \"pills\",\n        \"queryType\": 1,\n        \"resourceType\": \"microsoft.resourcegraph/resources\"\n      },\n      \"name\": \"Parameters\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## STAT Next deployment\\nCurrent Azure resources discovered for the STAT Next Function, managed identity, hosting plan, storage and Application Insights.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Statistics\"},\n      \"name\":\"StatisticsTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"resources\\n| where id == '{FunctionApp}'\\n| extend FunctionName=name, FunctionState=tostring(properties.state), FunctionLocation=location, PrincipalId=tostring(identity.principalId), PlanId=tostring(properties.serverFarmId)\\n| project FunctionName, FunctionState, FunctionLocation, PrincipalId, PlanId\",\n        \"queryType\":1,\n        \"resourceType\":\"microsoft.resourcegraph/resources\",\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Statistics\"},\n      \"name\":\"FunctionInventory\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"resources\\n| where type in~ ('microsoft.web/sites','microsoft.web/serverfarms','microsoft.storage/storageaccounts','microsoft.insights/components','microsoft.managedidentity/userassignedidentities')\\n| where name startswith 'statnext'\\n| project Resource=name, Type=type, Location=location, ResourceGroup=resourceGroup\",\n        \"queryType\":1,\n        \"resourceType\":\"microsoft.resourcegraph/resources\",\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Statistics\"},\n      \"name\":\"ResourceInventory\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## Function health and telemetry\\nApplication Insights request success, failures and latency for the selected STAT Next Function.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"HealthTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"requests\\n| where timestamp {TimeRange}\\n| summarize Requests=count(), Successful=countif(success == true), Failed=countif(success == false), AvgDurationMs=round(avg(duration / 1ms),2) by bin(timestamp, 15m)\\n| order by timestamp asc\",\n        \"queryType\":0,\n        \"resourceType\":\"microsoft.insights/components\",\n        \"crossComponentResources\":[\"{FunctionApp}\"],\n        \"visualization\":\"timechart\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"RequestHealth\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"exceptions\\n| where timestamp {TimeRange}\\n| summarize Failures=count() by problemId, outerMessage\\n| top 20 by Failures desc\",\n        \"queryType\":0,\n        \"resourceType\":\"microsoft.insights/components\",\n        \"crossComponentResources\":[\"{FunctionApp}\"],\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"Exceptions\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## Sentinel activity\\nRecent Sentinel incidents in the selected workspace. This view is read-only.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"SentinelTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"SecurityIncident\\n| where TimeGenerated {TimeRange}\\n| summarize Incidents=count(), High=countif(Severity =~ 'High'), Medium=countif(Severity =~ 'Medium'), Low=countif(Severity =~ 'Low') by bin(TimeGenerated, 1d)\\n| order by TimeGenerated asc\",\n        \"queryType\":0,\n        \"resourceType\":\"microsoft.operationalinsights/workspaces\",\n        \"crossComponentResources\":[\"{Workspace}\"],\n        \"visualization\":\"timechart\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Health\"},\n      \"name\":\"SentinelIncidents\"\n    },\n    {\n      \"type\": 1,\n      \"content\": {\"json\":\"## STAT Next version\\nSTAT Next replaces the legacy custom connector/Logic App module version model with a single Function application package and infrastructure deployment.\"},\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Versions\"},\n      \"name\":\"VersionsTitle\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\":\"KqlItem/1.0\",\n        \"query\":\"resources\\n| where id == '{FunctionApp}'\\n| project Component='STAT Next Function', Resource=name, Runtime=tostring(properties.siteConfig.linuxFxVersion), State=tostring(properties.state), Location=location\",\n        \"queryType\":1,\n        \"resourceType\":\"microsoft.resourcegraph/resources\",\n        \"visualization\":\"table\"\n      },\n      \"conditionalVisibility\":{\"parameterName\":\"ActiveTab\",\"comparison\":\"isEqualTo\",\"value\":\"Versions\"},\n      \"name\":\"VersionInventory\"\n    }\n  ],\n  \"fallbackResourceIds\": [\"Azure Monitor\"]\n}\n",
+    "storageName": "[take(replace(toLower(parameters('namePrefix')), '-', ''), 24)]",
+    "planName": "[format('{0}-plan', parameters('namePrefix'))]",
+    "functionName": "[format('{0}-api', parameters('namePrefix'))]",
+    "apiCallerIdentityName": "[format('{0}-api-caller', take(parameters('namePrefix'), 45))]",
+    "insightsName": "[format('{0}-appi', parameters('namePrefix'))]",
+    "workbookName": "[guid(resourceGroup().id, parameters('namePrefix'), 'status-workbook')]",
+    "packageContainerName": "statnext-package",
+    "packageBlobName": "[format('stat-next-{0}.zip', parameters('packageDeploymentId'))]",
+    "stagingIdentityName": "[format('{0}-stage', take(parameters('namePrefix'), 40))]",
+    "statApiAudience": "https://management.azure.com/",
+    "storageBlobDataOwnerRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
+    "storageBlobDataReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]",
+    "storageBlobDataContributorRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('storageName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "allowBlobPublicAccess": false,
+        "allowCrossTenantReplication": false,
+        "minimumTlsVersion": "TLS1_2",
+        "supportsHttpsTrafficOnly": true,
+        "defaultToOAuthAuthentication": true,
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}', variables('storageName'), 'default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}/{2}', variables('storageName'), 'default', variables('packageContainerName'))]",
+      "properties": {
+        "publicAccess": "None"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('stagingIdentityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('apiCallerIdentityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')), 'package-stage-writer')]",
+      "properties": {
+        "roleDefinitionId": "[variables('storageBlobDataContributorRole')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deploymentScripts",
+      "apiVersion": "2023-08-01",
+      "name": "StageSTATNextPackage",
+      "location": "[parameters('location')]",
+      "kind": "AzureCLI",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')))]": {}
+        }
+      },
+      "properties": {
+        "azCliVersion": "2.67.0",
+        "timeout": "PT15M",
+        "cleanupPreference": "OnSuccess",
+        "retentionInterval": "P1D",
+        "forceUpdateTag": "[parameters('packageDeploymentId')]",
+        "environmentVariables": [
+          {
+            "name": "SOURCE_URI",
+            "value": "[parameters('packageUri')]"
+          },
+          {
+            "name": "STORAGE_ACCOUNT",
+            "value": "[variables('storageName')]"
+          },
+          {
+            "name": "CONTAINER",
+            "value": "[variables('packageContainerName')]"
+          },
+          {
+            "name": "BLOB_NAME",
+            "value": "[variables('packageBlobName')]"
+          }
+        ],
+        "scriptContent": "      set -euo pipefail\n      tmp=/tmp/stat-next.zip\n      curl --fail --location --retry 3 --output \"$tmp\" \"$SOURCE_URI\"\n      test -s \"$tmp\"\n      python3 - <<'PY'\nimport zipfile\np='/tmp/stat-next.zip'\nwith zipfile.ZipFile(p) as z:\n    names=set(z.namelist())\n    if 'function_app.py' not in names:\n        raise SystemExit('Invalid STAT package: function_app.py missing from ZIP root')\n    data=z.read('function_app.py').decode('utf-8')\n    required=['stat_base','stat_aad_risks','stat_related_alerts','stat_threat_intel','stat_ip_baseline','stat_watchlist','stat_kql','stat_mde','stat_ueba','stat_file','stat_mcas','stat_oof','stat_run_playbook','stat_scoring','stat_comment']\n    missing=[x for x in required if x not in data]\n    if missing:\n        raise SystemExit('Invalid/incomplete STAT package; missing routes: '+','.join(missing))\nprint('STAT package validation passed')\nPY\n      az storage blob upload --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --file \"$tmp\" --overwrite true --auth-mode login --only-show-errors\n      az storage blob show --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --auth-mode login --query '{name:name,size:properties.contentLength}' -o json\n    "
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', variables('packageContainerName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('stagingIdentityName')), 'package-stage-writer'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('insightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web"
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('planName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Y1",
+        "tier": "Dynamic"
+      },
+      "kind": "linux",
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('functionName')]",
+      "location": "[parameters('location')]",
+      "kind": "functionapp,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "PYTHON|3.12",
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "http20Enabled": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "[resourceId('Microsoft.Resources/deploymentScripts', 'StageSTATNextPackage')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', variables('functionName'), 'authsettingsV2')]",
+      "properties": {
+        "platform": {
+          "enabled": true,
+          "runtimeVersion": "~1"
+        },
+        "globalValidation": {
+          "requireAuthentication": true,
+          "unauthenticatedClientAction": "Return401"
+        },
+        "httpSettings": {
+          "requireHttps": true
+        },
+        "identityProviders": {
+          "azureActiveDirectory": {
+            "enabled": true,
+            "registration": {
+              "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]",
+              "openIdIssuer": "[format('https://sts.windows.net/{0}/', tenant().tenantId)]"
+            },
+            "validation": {
+              "allowedAudiences": [
+                "[variables('statApiAudience')]"
+              ],
+              "defaultAuthorizationPolicy": {
+                "allowedApplications": [
+                  "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]"
+                ],
+                "allowedPrincipals": {
+                  "identities": [
+                    "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').principalId]"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "login": {
+          "tokenStore": {
+            "enabled": false
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName'))]",
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage')]",
+      "properties": {
+        "roleDefinitionId": "[variables('storageBlobDataOwnerRole')]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'package-reader')]",
+      "properties": {
+        "roleDefinitionId": "[variables('storageBlobDataReaderRole')]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', variables('functionName'), 'appsettings')]",
+      "properties": "[union(createObject('FUNCTIONS_EXTENSION_VERSION', '~4', 'FUNCTIONS_WORKER_RUNTIME', 'python', 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString, 'AzureWebJobsStorage__accountName', variables('storageName'), 'AzureWebJobsStorage__credential', 'managedidentity', 'AzureWebJobsStorage__blobServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, 'AzureWebJobsStorage__queueServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue, 'AzureWebJobsStorage__tableServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table, 'WEBSITE_RUN_FROM_PACKAGE', format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName')), 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID', 'SystemAssigned', 'WEBSITE_AUTH_AAD_ALLOWED_TENANTS', tenant().tenantId), if(empty(parameters('defenderCloudAppsApiUrl')), createObject(), createObject('STAT_MCAS_PORTAL_URL', parameters('defenderCloudAppsApiUrl'))), if(empty(parameters('runPlaybookAllowedResourceIds')), createObject(), createObject('RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS', parameters('runPlaybookAllowedResourceIds'))))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites/config', variables('functionName'), 'authsettingsV2')]",
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage'))]",
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'package-reader'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('sentinelSubscriptionId'), parameters('sentinelResourceGroup')), 'Microsoft.Resources/deployments', 'statNextWorkspaceRbac')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', variables('functionName'), 'ftp')]",
+      "properties": {
+        "allow": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', variables('functionName'), 'scm')]",
+      "properties": {
+        "allow": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2023-06-01",
+      "name": "[variables('workbookName')]",
+      "location": "[parameters('location')]",
+      "kind": "shared",
+      "properties": {
+        "displayName": "Sentinel Triage AssistanT Next - Status",
+        "serializedData": "[variables('$fxv#0')]",
+        "version": "1.0",
+        "sourceId": "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+        "category": "workbook",
+        "description": "STAT Next operational workbook based on the original STAT Status workbook."
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('sentinelSubscriptionId'), parameters('sentinelResourceGroup')), 'Microsoft.Resources/deployments', 'statNextWorkspaceRbac')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "statNextWorkspaceRbac",
+      "subscriptionId": "[parameters('sentinelSubscriptionId')]",
+      "resourceGroup": "[parameters('sentinelResourceGroup')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "workspaceName": {
+            "value": "[parameters('sentinelWorkspaceName')]"
+          },
+          "functionPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "3710975243865883458"
+            }
+          },
+          "parameters": {
+            "workspaceName": {
+              "type": "string"
+            },
+            "functionPrincipalId": {
+              "type": "string"
+            },
+            "playbookPrincipalId": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "variables": {
+            "logAnalyticsReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]",
+            "sentinelReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8d289c81-5878-46d4-8554-54e1e3d8b5cb')]",
+            "sentinelResponderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3e150937-b8fe-4cfb-8069-0eaf05ecd056')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('functionPrincipalId'), 'log-reader')]",
+              "properties": {
+                "roleDefinitionId": "[variables('logAnalyticsReaderRole')]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('functionPrincipalId'), 'sentinel-reader')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelReaderRole')]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('playbookPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('playbookPrincipalId'), 'sentinel-responder')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelResponderRole')]",
+                "principalId": "[parameters('playbookPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('runPlaybookAllowedResourceIds')))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "statNextRunPlaybookRbac",
+      "subscriptionId": "[parameters('runPlaybookSubscriptionId')]",
+      "resourceGroup": "[parameters('runPlaybookResourceGroup')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "functionPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "7208013805233121773"
+            }
+          },
+          "parameters": {
+            "functionPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "System Assigned Managed Identity object ID for the STAT Next Function App."
+              }
+            }
+          },
+          "variables": {
+            "sentinelPlaybookOperatorRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '51d6186e-6489-4900-b93f-92e23144cca5')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('functionPrincipalId'), 'stat-run-playbook-operator')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelPlaybookOperatorRole')]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "functionName": {
+      "type": "string",
+      "value": "[variables('functionName')]"
+    },
+    "functionPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+    },
+    "apiCallerIdentityName": {
+      "type": "string",
+      "value": "[variables('apiCallerIdentityName')]"
+    },
+    "apiCallerIdentityResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName'))]"
+    },
+    "apiCallerIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]"
+    },
+    "apiCallerIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').principalId]"
+    },
+    "statApiAudience": {
+      "type": "string",
+      "value": "[variables('statApiAudience')]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "value": "[variables('storageName')]"
+    },
+    "packageBlobUri": {
+      "type": "string",
+      "value": "[format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName'))]"
+    },
+    "packageDeploymentId": {
+      "type": "string",
+      "value": "[parameters('packageDeploymentId')]"
+    },
+    "workbookName": {
+      "type": "string",
+      "value": "[variables('workbookName')]"
+    },
+    "defenderCloudAppsConfigured": {
+      "type": "bool",
+      "value": "[not(empty(parameters('defenderCloudAppsApiUrl')))]"
+    },
+    "runPlaybookEnabled": {
+      "type": "bool",
+      "value": "[not(empty(parameters('runPlaybookAllowedResourceIds')))]"
+    },
+    "playbookDeployment": {
+      "type": "string",
+      "value": "Deploy infrastructure/playbook-activate.json only after the complete Function set is healthy."
+    }
+  }
+}

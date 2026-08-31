@@ -1,0 +1,276 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "4001581297347143790"
+    }
+  },
+  "parameters": {
+    "namePrefix": {
+      "type": "string",
+      "minLength": 5,
+      "metadata": {
+        "description": "Use the same Name Prefix as the STAT Next core deployment."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "sentinelSubscriptionId": {
+      "type": "string",
+      "defaultValue": "[subscription().subscriptionId]",
+      "metadata": {
+        "description": "Subscription containing the Sentinel workspace."
+      }
+    },
+    "sentinelResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group containing the Sentinel workspace."
+      }
+    },
+    "sentinelWorkspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Log Analytics workspace used by Microsoft Sentinel."
+      }
+    }
+  },
+  "variables": {
+    "functionName": "[format('{0}-api', parameters('namePrefix'))]",
+    "playbookName": "[format('{0}-incident-triage', parameters('namePrefix'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "statNextIncidentPlaybook",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[variables('playbookName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "functionAppName": {
+            "value": "[variables('functionName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "8871193350344679372"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "functionAppName": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Logic/workflows",
+              "apiVersion": "2019-05-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "state": "Disabled",
+                "definition": {
+                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "ProjectName": {
+                      "type": "String",
+                      "defaultValue": "STATNext"
+                    },
+                    "PlaybookVersion": {
+                      "type": "String",
+                      "defaultValue": "1.1.0-bootstrap"
+                    },
+                    "FunctionAppName": {
+                      "type": "String",
+                      "defaultValue": "[parameters('functionAppName')]"
+                    }
+                  },
+                  "triggers": {
+                    "manual": {
+                      "type": "Request",
+                      "kind": "Http",
+                      "inputs": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {}
+                        }
+                      }
+                    }
+                  },
+                  "actions": {
+                    "Bootstrap_ready": {
+                      "type": "Compose",
+                      "inputs": {
+                        "status": "STAT Next Sentinel playbook identity created. Sentinel connector activation is the next stage.",
+                        "functionAppName": "[parameters('functionAppName')]"
+                      },
+                      "runAfter": {}
+                    }
+                  },
+                  "outputs": {}
+                },
+                "parameters": {}
+              }
+            }
+          ],
+          "outputs": {
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('name')), '2019-05-01', 'full').identity.principalId]"
+            },
+            "resourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Logic/workflows', parameters('name'))]"
+            },
+            "playbookName": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "bootstrapState": {
+              "type": "string",
+              "value": "Disabled"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "statNextPlaybookRbac",
+      "subscriptionId": "[parameters('sentinelSubscriptionId')]",
+      "resourceGroup": "[parameters('sentinelResourceGroup')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "workspaceName": {
+            "value": "[parameters('sentinelWorkspaceName')]"
+          },
+          "functionPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+          },
+          "playbookPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "3710975243865883458"
+            }
+          },
+          "parameters": {
+            "workspaceName": {
+              "type": "string"
+            },
+            "functionPrincipalId": {
+              "type": "string"
+            },
+            "playbookPrincipalId": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "variables": {
+            "logAnalyticsReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '73c42c96-874c-492b-b04d-ab87d138a893')]",
+            "sentinelReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8d289c81-5878-46d4-8554-54e1e3d8b5cb')]",
+            "sentinelResponderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3e150937-b8fe-4cfb-8069-0eaf05ecd056')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('functionPrincipalId'), 'log-reader')]",
+              "properties": {
+                "roleDefinitionId": "[variables('logAnalyticsReaderRole')]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('functionPrincipalId'), 'sentinel-reader')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelReaderRole')]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('playbookPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), parameters('playbookPrincipalId'), 'sentinel-responder')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelResponderRole')]",
+                "principalId": "[parameters('playbookPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "playbookName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.playbookName.value]"
+    },
+    "playbookPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.principalId.value]"
+    },
+    "playbookState": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'statNextIncidentPlaybook'), '2025-04-01').outputs.bootstrapState.value]"
+    },
+    "nextStep": {
+      "type": "string",
+      "value": "After deployment succeeds and RBAC propagates, enable the Logic App in Azure Portal to register the Sentinel incident webhook."
+    }
+  }
+}
