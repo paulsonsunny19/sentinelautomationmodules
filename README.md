@@ -35,12 +35,15 @@ STAT Next is a new implementation rather than a deployment wrapper around the le
 | `stat_file` | File/hash enrichment |
 | `stat_mcas` | Defender for Cloud Apps compatibility enrichment |
 | `stat_oof` | Optional Microsoft Graph automatic-replies / out-of-office enrichment |
+| `stat_run_playbook` | Optional exact-allow-listed start of a compatible Consumption Logic App Request/manual trigger |
 | `stat_scoring` | Aggregate module scoring |
 | `stat_comment` | Build the rich analyst-facing Sentinel incident comment |
 
 The native activation playbook passes the complete Sentinel trigger plus an explicit `incidentArmId` into `stat_base`. Missing incident ARM scope is rejected instead of silently skipping GeoIP enrichment.
 
 `stat_oof` is available for custom/extended playbooks but is intentionally **not** called by the default native triage playbook. It requires the read-only Microsoft Graph application permission `MailboxSettings.Read`, so deployments that do not need OOF enrichment do not incur that runtime dependency or 403 noise.
+
+`stat_run_playbook` is also **disabled by default**. Enabling it requires a comma-separated list of exact Consumption Logic App resource IDs in `runPlaybookAllowedResourceIds`. The deployment then grants the Function managed identity Microsoft Sentinel Playbook Operator only on the configured playbook resource group. The module uses that role to obtain the `manual` trigger callback URL from Azure Resource Manager, then sends only the current `IncidentARMId` to the signed callback. Prefix matching and unrestricted fallback behavior are intentionally not supported.
 
 ## Deployment notes
 
