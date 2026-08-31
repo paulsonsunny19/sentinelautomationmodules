@@ -21,15 +21,15 @@ jobs:
   python:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: src
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r src/requirements.txt pytest
+      - run: pip install -r requirements.txt pytest
       - run: pytest -q
-      - run: python -m compileall -q src function_app.py modules
+      - run: python -m compileall -q function_app.py modules
 
   infrastructure:
     runs-on: ubuntu-latest
@@ -54,7 +54,7 @@ jobs:
           assert 'tenantId' in d.get('parameters', {})
           wf=next(r for r in d.get('resources',[]) if r.get('type')=='Microsoft.Logic/workflows')
           definition=wf['properties']['definition']; actions=definition['actions']
-          required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','Build_STAT_Comment','High_Risk'}
+          required={'Build_STAT_Base','AAD_Risks','Related_Alerts','Threat_Intelligence','IP_Network_Baseline','MDE','UEBA','File_Insights','Defender_for_Cloud_Apps','Score_STAT','Build_STAT_Comment','High_Risk'}
           missing=required-set(actions); assert not missing, f'Missing STAT actions: {sorted(missing)}'
           assert wf.get('identity',{}).get('type')=='SystemAssigned'
           trigger=definition['triggers']['Microsoft_Sentinel_incident']
@@ -97,6 +97,7 @@ jobs:
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'requirements.txt'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/sentinel.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/comment.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/ip_baseline.py'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/functions/'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/identity/'
           sha256sum artifacts/stat-next.zip
