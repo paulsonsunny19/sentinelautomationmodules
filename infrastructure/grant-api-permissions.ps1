@@ -2,13 +2,19 @@
 # Run as a tenant administrator after the core deployment creates the Function identity.
 # Requires Azure CLI with permission to create Microsoft Graph app-role assignments.
 #
-# This intentionally grants only application permissions used by STAT Next:
-#   Microsoft Graph: IdentityRiskyUser.Read.All
+# Microsoft Graph application permissions used by modules/aad_risks.py:
+#   User.Read.All                 - user profile lookup
+#   IdentityRiskyUser.Read.All    - riskyUsers
+#   IdentityRiskEvent.Read.All    - riskDetections
+#   AuditLog.Read.All             - authenticationMethods userRegistrationDetails
+#   RoleManagement.Read.Directory - directory role assignments/definitions
+#
+# Additional optional service permissions:
 #   WindowsDefenderATP: AdvancedQuery.Read.All, Machine.Read.All
 #   Microsoft Cloud App Security: Investigation.Read
 #
-# No client secret is created: the Azure Function uses its managed identity to obtain
-# OAuth tokens for each resource.
+# All permissions granted here are read-only. No client secret is created: the Azure
+# Function uses its system-assigned managed identity to obtain OAuth tokens.
 #
 # Usage:
 #   ./grant-api-permissions.ps1 -FunctionPrincipalId '<managed-identity-object-id>'
@@ -16,7 +22,7 @@
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
   [Parameter(Mandatory=$true)]
-  [ValidatePattern('^[0-9a-fA-F-]{36}$')]
+  [ValidatePattern('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')]
   [string]$FunctionPrincipalId
 )
 
@@ -47,8 +53,15 @@ function Grant-AppRole([string]$resourceAppId, [string]$roleValue) {
   }
 }
 
-# Microsoft Graph / Entra ID Protection
-Grant-AppRole '00000003-0000-0000-c000-000000000000' 'IdentityRiskyUser.Read.All'
+$graphAppId = '00000003-0000-0000-c000-000000000000'
+
+# Microsoft Graph / Entra identity enrichment. These are the least-privileged
+# application permissions documented for the Graph endpoints STAT Next calls.
+Grant-AppRole $graphAppId 'User.Read.All'
+Grant-AppRole $graphAppId 'IdentityRiskyUser.Read.All'
+Grant-AppRole $graphAppId 'IdentityRiskEvent.Read.All'
+Grant-AppRole $graphAppId 'AuditLog.Read.All'
+Grant-AppRole $graphAppId 'RoleManagement.Read.Directory'
 
 # Microsoft Defender for Endpoint / WindowsDefenderATP
 $defender = az ad sp list --filter "displayName eq 'WindowsDefenderATP'" --query '[0]' -o json | ConvertFrom-Json
@@ -56,9 +69,8 @@ if (-not $defender -or -not $defender.appId) { throw 'WindowsDefenderATP enterpr
 Grant-AppRole $defender.appId 'AdvancedQuery.Read.All'
 Grant-AppRole $defender.appId 'Machine.Read.All'
 
-# Microsoft Defender for Cloud Apps. The resource application ID is documented by
-# Microsoft for application-context OAuth. Investigation.Read is sufficient for the
-# read-only entities/investigation operations used by the STAT MCAS compatibility module.
+# Microsoft Defender for Cloud Apps. Investigation.Read is sufficient for the
+# read-only entities/investigation operations used by the STAT MCAS module.
 Grant-AppRole '05a65629-4c1b-48c1-a78b-804c4abdd4af' 'Investigation.Read'
 
 Write-Host 'STAT Next Function API permissions are configured.'
