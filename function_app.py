@@ -36,23 +36,32 @@ def execute(req,name,required,handler):
         logging.exception('%s failed correlationId=%s',name,cid); return response({'error':name+'_failure','correlationId':cid},502)
 
 def _trigger_entities(body):
-    trigger=body.get('Body') if isinstance(body.get('Body'),dict) else {}
+    trigger=body.get('Body') if isinstance(body.get('Body'),dict) else (body.get('body') if isinstance(body.get('body'),dict) else {})
     obj=trigger.get('object') if isinstance(trigger.get('object'),dict) else {}
     props=obj.get('properties') if isinstance(obj.get('properties'),dict) else {}
     entities=props.get('relatedEntities')
     return entities if isinstance(entities,list) else (body.get('entities') if isinstance(body.get('entities'),list) else [])
 
 def _incident_id(body):
-    trigger=body.get('Body') if isinstance(body.get('Body'),dict) else {}
-    obj=trigger.get('object') if isinstance(trigger.get('object'),dict) else {}
-    return body.get('incidentArmId') or obj.get('id')
+    for key in ('incidentArmId','IncidentARMId','incidentARMId'):
+        value=body.get(key)
+        if value:return value
+    trigger=body.get('Body') if isinstance(body.get('Body'),dict) else (body.get('body') if isinstance(body.get('body'),dict) else {})
+    obj=trigger.get('object') if isinstance(trigger.get('object'),dict) else (body.get('object') if isinstance(body.get('object'),dict) else {})
+    return obj.get('id') or trigger.get('incidentArmId') or trigger.get('IncidentARMId')
+
+def _build_base(body):
+    incident_id=_incident_id(body)
+    if not incident_id:
+        raise ValueError('incidentArmId is required for stat_base; send the full Microsoft Sentinel incident ARM resource ID')
+    return normalize(_trigger_entities(body),incident_id,body['workspaceId'],body.get('tenantId'),body.get('tenantDisplayName'))
 
 @app.route(route='health',methods=['GET'])
 def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
-def stat_base(req):return execute(req,'stat_base',('workspaceId',),lambda b:normalize(_trigger_entities(b),_incident_id(b) or '',b['workspaceId'],b.get('tenantId'),b.get('tenantDisplayName')))
+def stat_base(req):return execute(req,'stat_base',('workspaceId',),_build_base)
 @app.route(route='stat_aad_risks',methods=['POST'])
 def stat_aad_risks(req):return execute(req,'stat_aad_risks',('workspaceId','base'),lambda b:query_aad_risks(AADRisksRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),bool(b.get('mfaFailureLookup',True)),bool(b.get('mfaFraudLookup',True)))))
 @app.route(route='stat_related_alerts',methods=['POST'])
