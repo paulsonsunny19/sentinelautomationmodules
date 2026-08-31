@@ -12,6 +12,10 @@ class AADRisksRequest:
 RANK={'unknown':0,'none':1,'low':2,'medium':3,'high':4,'hidden':0,'unknownfuturevalue':0}
 
 def _column_names(columns):return [str(getattr(c,'name',c)) for c in columns]
+def _rows(result):
+    if result.status!=LogsQueryStatus.SUCCESS:return None
+    if not result.tables:return []
+    table=result.tables[0];names=_column_names(table.columns);return [dict(zip(names,row)) for row in table.rows]
 def _additional(raw):
     value=raw.get('additionalData') or raw.get('AdditionalData');return value if isinstance(value,dict) else {}
 def _first(*values):
@@ -45,6 +49,45 @@ def _mfa_telemetry_query(upn:str,days:int,include_failures:bool=True,include_fra
 | project Kind, Count''')
     if not parts:return ''
     return parts[0] if len(parts)==1 else 'union ' + ', '.join(f'({part})' for part in parts)
+
+def _workspace_risky_user_query(upn:str,days:int,identity_info:bool=False)->str:
+    safe=upn.replace("'","''")
+    if identity_info:
+        return f'''IdentityInfo
+| where TimeGenerated >= ago({days}d)
+| where AccountUPN =~ '{safe}'
+| summarize arg_max(TimeGenerated, *) by AccountUPN
+| project riskLevel=RiskLevel, riskState=RiskState, riskDetail=RiskLevelDetails, riskLastUpdatedDateTime=TimeGenerated'''
+    return f'''AADRiskyUsers
+| where TimeGenerated >= ago({days}d)
+| where UserPrincipalName =~ '{safe}'
+| summarize arg_max(TimeGenerated, *) by UserPrincipalName
+| project riskLevel=RiskLevel, riskState=RiskState, riskDetail=RiskDetail, riskLastUpdatedDateTime=RiskLastUpdatedDateTime'''
+
+def _workspace_risk_events_query(upn:str,days:int)->str:
+    safe=upn.replace("'","''")
+    return f'''AADUserRiskEvents
+| where TimeGenerated >= ago({days}d)
+| where UserPrincipalName =~ '{safe}'
+| project RiskEventType, RiskLevel, RiskState, RiskDetail, Activity, Source, DetectionTimingType, IPAddress=IpAddress, ActivityDateTime, DetectedDateTime, LastUpdatedDateTime
+| order by DetectedDateTime desc
+| take 50'''
+
+def _workspace_risky_user(logs,workspace_id,upn,days):
+    if not upn:return {},False
+    for identity_info in (False,True):
+        try:
+            rows=_rows(logs.query_workspace(workspace_id,_workspace_risky_user_query(upn,days,identity_info),timespan=timedelta(days=days),server_timeout=20))
+            if rows is not None:return (rows[0] if rows else {}),True
+        except Exception:pass
+    return {},False
+
+def _workspace_risk_events(logs,workspace_id,upn,days):
+    if not upn:return [],False
+    try:
+        rows=_rows(logs.query_workspace(workspace_id,_workspace_risk_events_query(upn,days),timespan=timedelta(days=days),server_timeout=20))
+        return (rows or []),rows is not None
+    except Exception:return [],False
 
 def _graph_url(path:str,params:dict[str,str]|None=None)->str:
     return 'https://graph.microsoft.com/v1.0/'+path.lstrip('/')+('?' + urllib.parse.urlencode(params,quote_via=urllib.parse.quote) if params else '')
@@ -100,18 +143,21 @@ def _graph_roles(token,user_id,warnings):
 def query_aad_risks(req):
     accounts=_accounts(req.base);days=max(1,min(int(req.lookback_days),90));credential=DefaultAzureCredential(exclude_interactive_browser_credential=True);token=credential.get_token('https://graph.microsoft.com/.default').token;logs=LogsQueryClient(credential);details=[];warnings=[];all_events=[];risk_user_available=True;risk_events_available=True
     for account in accounts:
-        aw=[];failed=fraud=0;upn=account['upn'];profile,profile_uid=_graph_profile(token,account,aw);uid=profile_uid or account['id'];incident_account={'id':uid,'upn':upn};risky,risky_ok=_graph_risky_user(token,incident_account,aw);events,events_ok=_graph_risk_detections(token,incident_account,aw);risk_user_available=risk_user_available and risky_ok;risk_events_available=risk_events_available and events_ok
+        aw=[];failed=fraud=0;upn=account['upn'];profile,profile_uid=_graph_profile(token,account,aw);uid=profile_uid or account['id'];incident_account={'id':uid,'upn':upn}
+        risky,risky_ok=_workspace_risky_user(logs,req.workspace_id,upn,days)
+        if not risky_ok:risky,risky_ok=_graph_risky_user(token,incident_account,aw)
+        events,events_ok=_workspace_risk_events(logs,req.workspace_id,upn,days)
+        if not events_ok:events,events_ok=_graph_risk_detections(token,incident_account,aw)
+        risk_user_available=risk_user_available and risky_ok;risk_events_available=risk_events_available and events_ok
         for event in events:all_events.append({'UserPrincipalName':upn,'UserId':uid,**event})
         registration=_graph_registration(token,uid,aw);roles=_graph_roles(token,uid,aw);risk=str(risky.get('riskLevel') or ('none' if risky_ok else 'unknown')).lower();risk='unknown' if risk in ('hidden','unknownfuturevalue') else risk
         if upn and (req.mfa_failure_lookup or req.mfa_fraud_lookup):
             query=_mfa_telemetry_query(upn,days,req.mfa_failure_lookup,req.mfa_fraud_lookup)
             try:
-                result=logs.query_workspace(req.workspace_id,query,timespan=timedelta(days=days),server_timeout=20)
-                if result.status==LogsQueryStatus.SUCCESS and result.tables:
-                    t=result.tables[0];names=_column_names(t.columns)
-                    for row in t.rows:
-                        d=dict(zip(names,row));failed=int(d.get('Count',0)) if d.get('Kind')=='failed' else failed;fraud=int(d.get('Count',0)) if d.get('Kind')=='fraud' else fraud
-                elif result.status!=LogsQueryStatus.SUCCESS:aw.append('MFA telemetry query did not complete successfully')
+                rows=_rows(logs.query_workspace(req.workspace_id,query,timespan=timedelta(days=days),server_timeout=20))
+                if rows is None:aw.append('MFA telemetry query did not complete successfully')
+                else:
+                    for d in rows:failed=int(d.get('Count',0)) if d.get('Kind')=='failed' else failed;fraud=int(d.get('Count',0)) if d.get('Kind')=='fraud' else fraud
             except Exception as exc:aw.append(f'MFA telemetry query failed ({type(exc).__name__}: {str(exc)[:160]})')
         detail={'UserFailedMFACount':failed,'UserMFAFraudCount':fraud,'UserId':uid,'UserPrincipalName':upn,'UserRiskLevel':risk,'UserRiskState':risky.get('riskState') if risky else None,'UserRiskDetail':risky.get('riskDetail') if risky else None,'UserRiskLastUpdated':risky.get('riskLastUpdatedDateTime') if risky else None,'RiskEventCount':len(events),'RiskUserAvailable':risky_ok,'RiskEventsAvailable':events_ok,'AADRoles':roles,**profile,**registration}
         if aw:detail['EnrichmentWarnings']=sorted(set(aw))
