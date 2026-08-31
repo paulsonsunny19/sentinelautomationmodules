@@ -1,9 +1,17 @@
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from modules.ip_baseline import classify_baseline
+def _load_runtime_module():
+    path = Path(__file__).resolve().parents[1] / 'modules' / 'ip_baseline.py'
+    spec = spec_from_file_location('stat_next_ip_baseline_runtime', path)
+    module = module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+classify_baseline = _load_runtime_module().classify_baseline
 
 
 def test_absence_is_not_scored_without_coverage():
