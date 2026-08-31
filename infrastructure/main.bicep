@@ -16,6 +16,12 @@ param packageUri string
 param packageDeploymentId string = utcNow('yyyyMMddHHmmss')
 @description('Optional tenant-specific Defender for Cloud Apps API/portal URL from Defender portal > Settings > Cloud Apps > System > About. Leave empty to deploy MDCA in ConfigurationRequired mode.')
 param defenderCloudAppsApiUrl string = ''
+@description('Comma-separated exact Consumption Logic App resource IDs allowed for stat_run_playbook. Empty disables RunPlaybook.')
+param runPlaybookAllowedResourceIds string = ''
+@description('Subscription containing the allow-listed RunPlaybook Logic Apps. Playbook Operator is granted only when RunPlaybook is enabled.')
+param runPlaybookSubscriptionId string = sentinelSubscriptionId
+@description('Single resource group containing the allow-listed RunPlaybook Logic Apps. Keep the exact allow-list limited to workflows in this resource group.')
+param runPlaybookResourceGroup string = sentinelResourceGroup
 
 var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
@@ -66,7 +72,7 @@ with zipfile.ZipFile(p) as z:
     if 'function_app.py' not in names:
         raise SystemExit('Invalid STAT package: function_app.py missing from ZIP root')
     data=z.read('function_app.py').decode('utf-8')
-    required=['stat_base','stat_aad_risks','stat_related_alerts','stat_threat_intel','stat_watchlist','stat_kql','stat_mde','stat_ueba','stat_file','stat_mcas','stat_scoring']
+    required=['stat_base','stat_aad_risks','stat_related_alerts','stat_threat_intel','stat_ip_baseline','stat_watchlist','stat_kql','stat_mde','stat_ueba','stat_file','stat_mcas','stat_oof','stat_run_playbook','stat_scoring','stat_comment']
     missing=[x for x in required if x not in data]
     if missing:
         raise SystemExit('Invalid/incomplete STAT package; missing routes: '+','.join(missing))
@@ -84,10 +90,21 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = { name: functionName, lo
 resource hostStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, functionApp.id, 'host-storage'), scope: storage, properties: { roleDefinitionId: storageBlobDataOwnerRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' } }
 resource packageReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, functionApp.id, 'package-reader'), scope: storage, properties: { roleDefinitionId: storageBlobDataReaderRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' } }
 module workspaceRbac 'workspace-rbac.bicep' = { name: 'statNextWorkspaceRbac', scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroup), params: { workspaceName: sentinelWorkspaceName, functionPrincipalId: functionApp.identity.principalId } }
+module runPlaybookRbac 'run-playbook-rbac.bicep' = if (!empty(runPlaybookAllowedResourceIds)) {
+  name: 'statNextRunPlaybookRbac'
+  scope: resourceGroup(runPlaybookSubscriptionId, runPlaybookResourceGroup)
+  params: {
+    functionPrincipalId: functionApp.identity.principalId
+  }
+}
 resource appSettings 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: functionApp
   name: 'appsettings'
-  properties: union({ FUNCTIONS_EXTENSION_VERSION: '~4', FUNCTIONS_WORKER_RUNTIME: 'python', APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString, AzureWebJobsStorage__accountName: storage.name, AzureWebJobsStorage__credential: 'managedidentity', AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob, AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue, AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table, WEBSITE_RUN_FROM_PACKAGE: privatePackageUri, WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned' }, empty(defenderCloudAppsApiUrl) ? {} : { STAT_MCAS_PORTAL_URL: defenderCloudAppsApiUrl })
+  properties: union(
+    { FUNCTIONS_EXTENSION_VERSION: '~4', FUNCTIONS_WORKER_RUNTIME: 'python', APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString, AzureWebJobsStorage__accountName: storage.name, AzureWebJobsStorage__credential: 'managedidentity', AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob, AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue, AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table, WEBSITE_RUN_FROM_PACKAGE: privatePackageUri, WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned' },
+    empty(defenderCloudAppsApiUrl) ? {} : { STAT_MCAS_PORTAL_URL: defenderCloudAppsApiUrl },
+    empty(runPlaybookAllowedResourceIds) ? {} : { RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS: runPlaybookAllowedResourceIds }
+  )
   dependsOn: [hostStorageRole, packageReaderRole, workspaceRbac]
 }
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'ftp', properties: { allow: false } }
@@ -100,4 +117,5 @@ output packageBlobUri string = privatePackageUri
 output packageDeploymentId string = packageDeploymentId
 output workbookName string = workbook.name
 output defenderCloudAppsConfigured bool = !empty(defenderCloudAppsApiUrl)
+output runPlaybookEnabled bool = !empty(runPlaybookAllowedResourceIds)
 output playbookDeployment string = 'Deploy infrastructure/playbook-activate.json only after the complete Function set is healthy.'
