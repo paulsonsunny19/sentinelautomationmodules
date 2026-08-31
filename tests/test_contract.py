@@ -2,10 +2,12 @@ import json
 
 import pytest
 
+from modules.aad_risks import _mfa_telemetry_query
 from modules.base import _normalize_geodata, _sentinel_geodata
 from modules.comment import build_comment
 from modules.related_alerts import RelatedAlertsRequest, query_related_alerts
 from modules.scoring import calculate, score_module
+from modules.ueba import _anomaly_query
 
 
 def test_related_alert_request_is_immutable():
@@ -104,3 +106,20 @@ def test_comment_surfaces_ip_geodata_warning():
     assert 'IP enrichment warning' in comment['Message']
     assert 'Sentinel GeoIP failed for 49.186.62.27' in comment['Message']
     assert 'IP GeoData' in comment['Message']
+
+
+def test_mfa_telemetry_kql_uses_valid_union_and_post_summary_labels():
+    query = _mfa_telemetry_query('user@example.com', 14, True, True)
+    assert query.startswith('union (SigninLogs')
+    assert "), (AuditLogs" in query
+    assert "summarize Kind='failed'" not in query
+    assert "summarize Kind='fraud'" not in query
+    assert "| extend Kind='failed'" in query
+    assert "| extend Kind='fraud'" in query
+
+
+def test_ueba_anomaly_kql_uses_current_id_column():
+    query = _anomaly_query(['user@example.com'], 14)
+    assert 'dcount(Id)' in query
+    assert 'AnomalyId' not in query
+    assert 'UserPrincipalName in~ (UPNs)' in query
