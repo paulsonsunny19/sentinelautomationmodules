@@ -1,9 +1,10 @@
 """Read-only Microsoft Graph automatic-replies enrichment.
 
-OOFModule is deliberately optional: the native Sentinel activation playbook does
-not call it by default because it requires the tenant-level Graph application
-permission MailboxSettings.Read. Custom playbooks can call ``stat_oof`` and pass
-the result into ``stat_comment``.
+The native STAT Next incident playbook calls OOFModule for incident accounts and
+passes the result into the final comment. The module requires the read-only
+Microsoft Graph application permission MailboxSettings.Read on the Function App
+managed identity. Missing permission degrades to warnings instead of failing the
+triage workflow.
 """
 from __future__ import annotations
 
