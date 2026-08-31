@@ -2,12 +2,13 @@
 # Run as a tenant administrator after the core deployment creates the Function identity.
 # Requires Azure CLI with permission to create Microsoft Graph app-role assignments.
 #
-# Microsoft Graph application permissions used by modules/aad_risks.py:
+# Microsoft Graph application permissions used by modules/aad_risks.py / modules/oof.py:
 #   User.Read.All                 - user profile lookup
 #   IdentityRiskyUser.Read.All    - riskyUsers
 #   IdentityRiskEvent.Read.All    - riskDetections
 #   AuditLog.Read.All             - authenticationMethods userRegistrationDetails
 #   RoleManagement.Read.Directory - directory role assignments/definitions
+#   MailboxSettings.Read          - automatic-replies / OOF status (optional OOFModule)
 #
 # Additional optional service permissions:
 #   WindowsDefenderATP: AdvancedQuery.Read.All, Machine.Read.All
@@ -55,13 +56,15 @@ function Grant-AppRole([string]$resourceAppId, [string]$roleValue) {
 
 $graphAppId = '00000003-0000-0000-c000-000000000000'
 
-# Microsoft Graph / Entra identity enrichment. These are the least-privileged
-# application permissions documented for the Graph endpoints STAT Next calls.
+# Microsoft Graph / Entra identity and optional OOF enrichment. These are the
+# least-privileged application permissions documented for the Graph endpoints
+# STAT Next calls.
 Grant-AppRole $graphAppId 'User.Read.All'
 Grant-AppRole $graphAppId 'IdentityRiskyUser.Read.All'
 Grant-AppRole $graphAppId 'IdentityRiskEvent.Read.All'
 Grant-AppRole $graphAppId 'AuditLog.Read.All'
 Grant-AppRole $graphAppId 'RoleManagement.Read.Directory'
+Grant-AppRole $graphAppId 'MailboxSettings.Read'
 
 # Microsoft Defender for Endpoint / WindowsDefenderATP
 $defender = az ad sp list --filter "displayName eq 'WindowsDefenderATP'" --query '[0]' -o json | ConvertFrom-Json
