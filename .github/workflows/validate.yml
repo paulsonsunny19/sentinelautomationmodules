@@ -65,13 +65,14 @@ jobs:
           base_body=actions['Build_STAT_Base']['inputs']['body']
           assert base_body['tenantId']=="[parameters('tenantId')]"
           assert base_body['Body']=='@triggerBody()'
+          assert base_body['incidentArmId']=="@triggerBody()?['object']?['id']"
           assert 'entities' not in base_body
           assert actions['Build_STAT_Base']['runAfter']=={}
           assert actions['Build_STAT_Comment']['inputs']['uri'].endswith("/stat_comment')]")
           assert actions['High_Risk']['runAfter']=={'Build_STAT_Comment':['Succeeded']}
           high=actions['High_Risk']['actions']; low=actions['High_Risk']['else']['actions']
           assert 'Add_STAT_High_Risk_Comment' in high and 'Add_STAT_Low_Risk_Comment' in low
-          print('Native Sentinel full-trigger and rich-comment contract is structurally valid')
+          print('Native Sentinel full-trigger, incident-id and rich-comment contract is structurally valid')
           PY
 
   package:
