@@ -3,9 +3,10 @@ from typing import Any
 import ipaddress, json, urllib.error, urllib.parse, urllib.request
 from azure.identity import DefaultAzureCredential
 
-# Microsoft currently recommends 2025-07-01-preview for Sentinel preview APIs.
-# Keep this explicit so an API retirement cannot silently change behaviour.
+# Primary workspace-scoped Sentinel GeoIP API.
 SENTINEL_ENRICHMENT_API_VERSION = '2025-07-01-preview'
+# Compatibility fallback used by the original Sentinel GeoIP surface.
+SENTINEL_LEGACY_ENRICHMENT_API_VERSION = '2024-01-01-preview'
 
 def _props(entity:dict[str,Any])->dict[str,Any]:
     value=entity.get('properties'); return value if isinstance(value,dict) else entity
@@ -34,20 +35,56 @@ def _public_ip(value:Any)->str|None:
     parsed=_parsed_ip(value)
     return str(parsed) if parsed and parsed.is_global else None
 
-def _sentinel_geodata(credential:DefaultAzureCredential,subscription:str,resource_group:str,workspace:str,ip:str)->tuple[dict[str,Any],str|None]:
-    token=credential.get_token('https://management.azure.com/.default').token
-    url=(f'https://management.azure.com/subscriptions/{urllib.parse.quote(subscription,safe="")}/resourceGroups/{urllib.parse.quote(resource_group,safe="")}'
-         f'/providers/Microsoft.OperationalInsights/workspaces/{urllib.parse.quote(workspace,safe="")}'
-         f'/providers/Microsoft.SecurityInsights/enrichment/main/listGeodataByIp?api-version={SENTINEL_ENRICHMENT_API_VERSION}')
-    request=urllib.request.Request(url,data=json.dumps({'ipAddress':ip}).encode(),method='POST',headers={'Authorization':f'Bearer {token}','Accept':'application/json','Content-Type':'application/json'})
+def _normalize_geodata(data:Any)->dict[str,Any]:
+    if not isinstance(data,dict): return {}
+    props=data.get('properties')
+    if isinstance(props,dict): data=props
+    useful=('city','state','country','organization','organizationType','asn','carrier','region','continent','latitude','longitude','ipAddr','ipRoutingType')
+    return {k:data.get(k) for k in useful if data.get(k) not in (None,'')}
+
+def _http_error_detail(exc:urllib.error.HTTPError)->str:
+    try:
+        payload=json.loads(exc.read().decode())
+        err=payload.get('error') if isinstance(payload,dict) else None
+        if isinstance(err,dict):
+            code=str(err.get('code') or '').strip(); message=' '.join(str(err.get('message') or '').split())[:220]
+            if code and message:return f'{code}: {message}'
+            if code:return code
+            if message:return message
+    except Exception: pass
+    return ''
+
+def _request_json(request:urllib.request.Request)->tuple[dict[str,Any],str|None]:
     try:
         with urllib.request.urlopen(request,timeout=15) as response:
             data=json.loads(response.read().decode())
-            if not isinstance(data,dict):return {},f'Sentinel GeoIP returned an invalid payload for {ip}'
-            return data,None
-    except urllib.error.HTTPError as exc:return {},f'Sentinel GeoIP returned HTTP {exc.code} for {ip}'
-    except urllib.error.URLError as exc:return {},f'Sentinel GeoIP connection failed for {ip} ({type(exc.reason).__name__})'
-    except Exception as exc:return {},f'Sentinel GeoIP lookup failed for {ip} ({type(exc).__name__})'
+            geo=_normalize_geodata(data)
+            if geo:return geo,None
+            return {},'returned an empty or unrecognized geodata payload'
+    except urllib.error.HTTPError as exc:
+        detail=_http_error_detail(exc)
+        return {},f'HTTP {exc.code}'+(f' ({detail})' if detail else '')
+    except urllib.error.URLError as exc:return {},f'connection failed ({type(exc.reason).__name__})'
+    except Exception as exc:return {},f'lookup failed ({type(exc).__name__})'
+
+def _sentinel_geodata(credential:DefaultAzureCredential,subscription:str,resource_group:str,workspace:str,ip:str)->tuple[dict[str,Any],str|None]:
+    token=credential.get_token('https://management.azure.com/.default').token
+    headers={'Authorization':f'Bearer {token}','Accept':'application/json'}
+    primary_url=(f'https://management.azure.com/subscriptions/{urllib.parse.quote(subscription,safe="")}/resourceGroups/{urllib.parse.quote(resource_group,safe="")}'
+         f'/providers/Microsoft.OperationalInsights/workspaces/{urllib.parse.quote(workspace,safe="")}'
+         f'/providers/Microsoft.SecurityInsights/enrichment/main/listGeodataByIp?api-version={SENTINEL_ENRICHMENT_API_VERSION}')
+    primary=urllib.request.Request(primary_url,data=json.dumps({'ipAddress':ip}).encode(),method='POST',headers={**headers,'Content-Type':'application/json'})
+    geo,primary_error=_request_json(primary)
+    if geo:return geo,None
+
+    # Keep a compatibility path matching the long-standing Sentinel GeoIP endpoint.
+    legacy_url=(f'https://management.azure.com/subscriptions/{urllib.parse.quote(subscription,safe="")}/resourceGroups/{urllib.parse.quote(resource_group,safe="")}'
+        f'/providers/Microsoft.SecurityInsights/enrichment/ip/geodata/?api-version={SENTINEL_LEGACY_ENRICHMENT_API_VERSION}'
+        f'&ipAddress={urllib.parse.quote(ip,safe="")}')
+    legacy=urllib.request.Request(legacy_url,method='GET',headers=headers)
+    geo,legacy_error=_request_json(legacy)
+    if geo:return geo,None
+    return {},f'Sentinel GeoIP failed for {ip}: workspace API {primary_error}; compatibility API {legacy_error}'
 
 def normalize_entities(entities:list[dict[str,Any]],incident_arm_id:str,workspace_id:str)->dict[str,Any]:
     accounts=[];ips=[];hosts=[];files=[];hashes=[];domains=[];urls=[];other=[]
