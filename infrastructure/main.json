@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "12839570881829654120"
+      "templateHash": "2396903106697805051"
     }
   },
   "parameters": {
@@ -93,6 +93,7 @@
     "packageContainerName": "statnext-package",
     "packageBlobName": "[format('stat-next-{0}.zip', parameters('packageDeploymentId'))]",
     "stagingIdentityName": "[format('{0}-stage', take(parameters('namePrefix'), 40))]",
+    "statApiAudience": "https://management.azure.com/",
     "storageBlobDataOwnerRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
     "storageBlobDataReaderRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]",
     "storageBlobDataContributorRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
@@ -281,7 +282,7 @@
             },
             "validation": {
               "allowedAudiences": [
-                "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]"
+                "[variables('statApiAudience')]"
               ],
               "defaultAuthorizationPolicy": {
                 "allowedApplications": [
@@ -563,6 +564,10 @@
     "apiCallerIdentityPrincipalId": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').principalId]"
+    },
+    "statApiAudience": {
+      "type": "string",
+      "value": "[variables('statApiAudience')]"
     },
     "storageAccountName": {
       "type": "string",
