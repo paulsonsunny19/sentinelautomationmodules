@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "17879930211061879928"
+      "templateHash": "15135963138729731486"
     }
   },
   "parameters": {
@@ -58,6 +58,27 @@
       "defaultValue": "",
       "metadata": {
         "description": "Optional tenant-specific Defender for Cloud Apps API/portal URL from Defender portal > Settings > Cloud Apps > System > About. Leave empty to deploy MDCA in ConfigurationRequired mode."
+      }
+    },
+    "runPlaybookAllowedResourceIds": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Comma-separated exact Consumption Logic App resource IDs allowed for stat_run_playbook. Empty disables RunPlaybook."
+      }
+    },
+    "runPlaybookSubscriptionId": {
+      "type": "string",
+      "defaultValue": "[parameters('sentinelSubscriptionId')]",
+      "metadata": {
+        "description": "Subscription containing the allow-listed RunPlaybook Logic Apps. Playbook Operator is granted only when RunPlaybook is enabled."
+      }
+    },
+    "runPlaybookResourceGroup": {
+      "type": "string",
+      "defaultValue": "[parameters('sentinelResourceGroup')]",
+      "metadata": {
+        "description": "Single resource group containing the allow-listed RunPlaybook Logic Apps. Keep the exact allow-list limited to workflows in this resource group."
       }
     }
   },
@@ -170,7 +191,7 @@
             "value": "[variables('packageBlobName')]"
           }
         ],
-        "scriptContent": "      set -euo pipefail\n      tmp=/tmp/stat-next.zip\n      curl --fail --location --retry 3 --output \"$tmp\" \"$SOURCE_URI\"\n      test -s \"$tmp\"\n      python3 - <<'PY'\nimport zipfile\np='/tmp/stat-next.zip'\nwith zipfile.ZipFile(p) as z:\n    names=set(z.namelist())\n    if 'function_app.py' not in names:\n        raise SystemExit('Invalid STAT package: function_app.py missing from ZIP root')\n    data=z.read('function_app.py').decode('utf-8')\n    required=['stat_base','stat_aad_risks','stat_related_alerts','stat_threat_intel','stat_watchlist','stat_kql','stat_mde','stat_ueba','stat_file','stat_mcas','stat_scoring']\n    missing=[x for x in required if x not in data]\n    if missing:\n        raise SystemExit('Invalid/incomplete STAT package; missing routes: '+','.join(missing))\nprint('STAT package validation passed')\nPY\n      az storage blob upload --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --file \"$tmp\" --overwrite true --auth-mode login --only-show-errors\n      az storage blob show --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --auth-mode login --query '{name:name,size:properties.contentLength}' -o json\n    "
+        "scriptContent": "      set -euo pipefail\n      tmp=/tmp/stat-next.zip\n      curl --fail --location --retry 3 --output \"$tmp\" \"$SOURCE_URI\"\n      test -s \"$tmp\"\n      python3 - <<'PY'\nimport zipfile\np='/tmp/stat-next.zip'\nwith zipfile.ZipFile(p) as z:\n    names=set(z.namelist())\n    if 'function_app.py' not in names:\n        raise SystemExit('Invalid STAT package: function_app.py missing from ZIP root')\n    data=z.read('function_app.py').decode('utf-8')\n    required=['stat_base','stat_aad_risks','stat_related_alerts','stat_threat_intel','stat_ip_baseline','stat_watchlist','stat_kql','stat_mde','stat_ueba','stat_file','stat_mcas','stat_oof','stat_run_playbook','stat_scoring','stat_comment']\n    missing=[x for x in required if x not in data]\n    if missing:\n        raise SystemExit('Invalid/incomplete STAT package; missing routes: '+','.join(missing))\nprint('STAT package validation passed')\nPY\n      az storage blob upload --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --file \"$tmp\" --overwrite true --auth-mode login --only-show-errors\n      az storage blob show --account-name \"$STORAGE_ACCOUNT\" --container-name \"$CONTAINER\" --name \"$BLOB_NAME\" --auth-mode login --query '{name:name,size:properties.contentLength}' -o json\n    "
       },
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', variables('packageContainerName'))]",
@@ -262,7 +283,7 @@
       "type": "Microsoft.Web/sites/config",
       "apiVersion": "2022-09-01",
       "name": "[format('{0}/{1}', variables('functionName'), 'appsettings')]",
-      "properties": "[union(createObject('FUNCTIONS_EXTENSION_VERSION', '~4', 'FUNCTIONS_WORKER_RUNTIME', 'python', 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString, 'AzureWebJobsStorage__accountName', variables('storageName'), 'AzureWebJobsStorage__credential', 'managedidentity', 'AzureWebJobsStorage__blobServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, 'AzureWebJobsStorage__queueServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue, 'AzureWebJobsStorage__tableServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table, 'WEBSITE_RUN_FROM_PACKAGE', format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName')), 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID', 'SystemAssigned'), if(empty(parameters('defenderCloudAppsApiUrl')), createObject(), createObject('STAT_MCAS_PORTAL_URL', parameters('defenderCloudAppsApiUrl'))))]",
+      "properties": "[union(createObject('FUNCTIONS_EXTENSION_VERSION', '~4', 'FUNCTIONS_WORKER_RUNTIME', 'python', 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString, 'AzureWebJobsStorage__accountName', variables('storageName'), 'AzureWebJobsStorage__credential', 'managedidentity', 'AzureWebJobsStorage__blobServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, 'AzureWebJobsStorage__queueServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue, 'AzureWebJobsStorage__tableServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table, 'WEBSITE_RUN_FROM_PACKAGE', format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName')), 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID', 'SystemAssigned'), if(empty(parameters('defenderCloudAppsApiUrl')), createObject(), createObject('STAT_MCAS_PORTAL_URL', parameters('defenderCloudAppsApiUrl'))), if(empty(parameters('runPlaybookAllowedResourceIds')), createObject(), createObject('RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS', parameters('runPlaybookAllowedResourceIds'))))]",
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage'))]",
@@ -401,6 +422,62 @@
       "dependsOn": [
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
       ]
+    },
+    {
+      "condition": "[not(empty(parameters('runPlaybookAllowedResourceIds')))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "statNextRunPlaybookRbac",
+      "subscriptionId": "[parameters('runPlaybookSubscriptionId')]",
+      "resourceGroup": "[parameters('runPlaybookResourceGroup')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "functionPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "7208013805233121773"
+            }
+          },
+          "parameters": {
+            "functionPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "System Assigned Managed Identity object ID for the STAT Next Function App."
+              }
+            }
+          },
+          "variables": {
+            "sentinelPlaybookOperatorRole": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '51d6186e-6489-4900-b93f-92e23144cca5')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('functionPrincipalId'), 'stat-run-playbook-operator')]",
+              "properties": {
+                "roleDefinitionId": "[variables('sentinelPlaybookOperatorRole')]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
     }
   ],
   "outputs": {
@@ -431,6 +508,10 @@
     "defenderCloudAppsConfigured": {
       "type": "bool",
       "value": "[not(empty(parameters('defenderCloudAppsApiUrl')))]"
+    },
+    "runPlaybookEnabled": {
+      "type": "bool",
+      "value": "[not(empty(parameters('runPlaybookAllowedResourceIds')))]"
     },
     "playbookDeployment": {
       "type": "string",
