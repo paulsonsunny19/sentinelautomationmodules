@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from modules.aad_risks import _mfa_telemetry_query
+from modules.aad_risks import _mfa_telemetry_query, _workspace_risk_events_query, _workspace_risky_user_query
 from modules.base import _normalize_geodata, _sentinel_geodata
 from modules.comment import build_comment
 from modules.related_alerts import RelatedAlertsRequest, query_related_alerts
@@ -116,6 +116,18 @@ def test_mfa_telemetry_kql_uses_valid_union_and_post_summary_labels():
     assert "summarize Kind='fraud'" not in query
     assert "| extend Kind='failed'" in query
     assert "| extend Kind='fraud'" in query
+
+
+def test_identity_risk_prefers_current_sentinel_tables():
+    risky = _workspace_risky_user_query('user@example.com', 14)
+    events = _workspace_risk_events_query('user@example.com', 14)
+    identity = _workspace_risky_user_query('user@example.com', 14, True)
+    assert risky.startswith('AADRiskyUsers')
+    assert 'RiskLastUpdatedDateTime' in risky
+    assert events.startswith('AADUserRiskEvents')
+    assert 'IPAddress=IpAddress' in events
+    assert identity.startswith('IdentityInfo')
+    assert "AccountUPN =~ 'user@example.com'" in identity
 
 
 def test_ueba_anomaly_kql_uses_current_id_column():
