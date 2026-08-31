@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from function_app import _build_base, _incident_id
 from modules.aad_risks import _mfa_telemetry_query, _workspace_risk_events_query, _workspace_risky_user_query
 from modules.base import _normalize_geodata, _sentinel_geodata
 from modules.comment import build_comment
@@ -106,6 +107,24 @@ def test_comment_surfaces_ip_geodata_warning():
     assert 'IP enrichment warning' in comment['Message']
     assert 'Sentinel GeoIP failed for 49.186.62.27' in comment['Message']
     assert 'IP GeoData' in comment['Message']
+
+
+def test_incident_arm_id_accepts_stat_and_stat_next_casing():
+    arm_id = '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/ws/providers/Microsoft.SecurityInsights/incidents/inc'
+    assert _incident_id({'incidentArmId': arm_id}) == arm_id
+    assert _incident_id({'IncidentARMId': arm_id}) == arm_id
+    assert _incident_id({'incidentARMId': arm_id}) == arm_id
+
+
+def test_incident_arm_id_accepts_native_sentinel_trigger_body():
+    arm_id = '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/ws/providers/Microsoft.SecurityInsights/incidents/inc'
+    assert _incident_id({'Body': {'object': {'id': arm_id}}}) == arm_id
+    assert _incident_id({'body': {'object': {'id': arm_id}}}) == arm_id
+
+
+def test_stat_base_fails_loudly_when_incident_arm_id_is_missing():
+    with pytest.raises(ValueError, match='incidentArmId is required'):
+        _build_base({'workspaceId': 'workspace', 'entities': []})
 
 
 def test_mfa_telemetry_kql_uses_valid_union_and_post_summary_labels():
