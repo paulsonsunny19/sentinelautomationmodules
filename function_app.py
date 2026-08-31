@@ -15,6 +15,7 @@ from modules.mde import MDERequest, query_mde
 from modules.ueba import UEBARequest, query_ueba
 from modules.file_insights import FileInsightsRequest, query_file_insights
 from modules.mcas import MCASRequest, query_mcas
+from modules.ip_baseline import IPBaselineRequest, query_ip_baseline
 
 # HTTP authorization is enforced by App Service Authentication (Easy Auth).
 # Anonymous here means the Functions runtime does not additionally require a
@@ -47,7 +48,7 @@ def _incident_id(body):
     return body.get('incidentArmId') or obj.get('id')
 
 @app.route(route='health',methods=['GET'])
-def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
+def health(req):return response({'service':'STAT Next','status':'healthy','modules':['BaseModule','AADRisksModule','RelatedAlerts','TIModule','IPNetworkBaselineModule','WatchlistModule','KQLModule','MDEModule','UEBAModule','FileModule','MCASModule','ScoringModule','STATComment'],'correlationId':str(uuid.uuid4())})
 @app.route(route='incident_context',methods=['POST'])
 def incident_context(req):return execute(req,'sentinel_api',('subscriptionId','resourceGroup','workspaceName','incidentId'),lambda b:{'module':'sentinel.incident_context',**safe_incident_context(b['subscriptionId'],b['resourceGroup'],b['workspaceName'],b['incidentId'])})
 @app.route(route='stat_base',methods=['POST'])
@@ -58,6 +59,8 @@ def stat_aad_risks(req):return execute(req,'stat_aad_risks',('workspaceId','base
 def stat_related_alerts(req):return execute(req,'stat_related_alerts',('workspaceId','base'),lambda b:query_related_alerts(RelatedAlertsRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),b.get('alertKqlFilter',''),bool(b.get('checkAccounts',True)),bool(b.get('checkHosts',True)),bool(b.get('checkIPs',True)))))
 @app.route(route='stat_threat_intel',methods=['POST'])
 def stat_threat_intel(req):return execute(req,'stat_threat_intel',('workspaceId','base'),lambda b:query_threat_intel(ThreatIntelRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',14)),bool(b.get('checkIPs',True)),bool(b.get('checkDomains',True)),bool(b.get('checkURLs',True)),bool(b.get('checkFileHashes',True)))))
+@app.route(route='stat_ip_baseline',methods=['POST'])
+def stat_ip_baseline(req):return execute(req,'stat_ip_baseline',('workspaceId','base'),lambda b:query_ip_baseline(IPBaselineRequest(b['workspaceId'],b['base'],int(b.get('lookbackDays',30)))))
 @app.route(route='stat_watchlist',methods=['POST'])
 def stat_watchlist(req):return execute(req,'stat_watchlist',('workspaceId','base','watchlistAlias','watchlistKey','watchlistKeyDataType'),lambda b:query_watchlist(WatchlistRequest(b['workspaceId'],b['base'],b['watchlistAlias'],b['watchlistKey'],b['watchlistKeyDataType'])))
 @app.route(route='stat_kql',methods=['POST'])
