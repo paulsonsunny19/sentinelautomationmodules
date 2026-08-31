@@ -42,6 +42,10 @@ The Function receives Microsoft Sentinel Reader and Log Analytics Reader at the 
 
 These roles are not silently embedded as tenant-wide ARM grants. A tenant administrator reviews and runs `infrastructure/grant-api-permissions.ps1` for the Function managed identity.
 
+### Optional automatic-replies / OOF enrichment
+
+`stat_oof` reads `users/{id|userPrincipalName}/mailboxSettings/automaticRepliesSetting` with the least-privileged Microsoft Graph application role `MailboxSettings.Read`. It never writes mailbox settings or sends mail. The default native triage playbook does not invoke this module, so environments that do not require OOF context do not need to depend on this Graph permission at runtime.
+
 ### Defender
 
 Defender for Endpoint and Defender for Cloud Apps permissions are independent read-only API profiles in the same administrator-reviewed permission script.
