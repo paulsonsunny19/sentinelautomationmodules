@@ -26,6 +26,7 @@ param runPlaybookResourceGroup string = sentinelResourceGroup
 var storageName = take(replace(toLower(namePrefix), '-', ''), 24)
 var planName = '${namePrefix}-plan'
 var functionName = '${namePrefix}-api'
+var apiCallerIdentityName = '${take(namePrefix, 45)}-api-caller'
 var insightsName = '${namePrefix}-appi'
 var workbookName = guid(resourceGroup().id, namePrefix, 'status-workbook')
 var packageContainerName = 'statnext-package'
@@ -46,6 +47,10 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = { parent: storage, name: 'default' }
 resource packageContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = { parent: blobService, name: packageContainerName, properties: { publicAccess: 'None' } }
 resource stagingIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = { name: stagingIdentityName, location: location }
+resource apiCallerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: apiCallerIdentityName
+  location: location
+}
 resource stagingWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, stagingIdentity.id, 'package-stage-writer'), scope: storage, properties: { roleDefinitionId: storageBlobDataContributorRole, principalId: stagingIdentity.properties.principalId, principalType: 'ServicePrincipal' } }
 resource stagePackage 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'StageSTATNextPackage'
@@ -87,6 +92,52 @@ PY
 resource insights 'Microsoft.Insights/components@2020-02-02' = { name: insightsName, location: location, kind: 'web', properties: { Application_Type: 'web' } }
 resource plan 'Microsoft.Web/serverfarms@2022-09-01' = { name: planName, location: location, sku: { name: 'Y1', tier: 'Dynamic' }, kind: 'linux', properties: { reserved: true } }
 resource functionApp 'Microsoft.Web/sites@2022-09-01' = { name: functionName, location: location, kind: 'functionapp,linux', identity: { type: 'SystemAssigned' }, properties: { serverFarmId: plan.id, httpsOnly: true, clientAffinityEnabled: false, siteConfig: { linuxFxVersion: 'PYTHON|3.12', minTlsVersion: '1.2', ftpsState: 'Disabled', http20Enabled: true } }, dependsOn: [stagePackage] }
+resource authSettings 'Microsoft.Web/sites/config@2022-09-01' = {
+  parent: functionApp
+  name: 'authsettingsV2'
+  properties: {
+    platform: {
+      enabled: true
+      runtimeVersion: '~1'
+    }
+    globalValidation: {
+      requireAuthentication: true
+      unauthenticatedClientAction: 'Return401'
+    }
+    httpSettings: {
+      requireHttps: true
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: apiCallerIdentity.properties.clientId
+          openIdIssuer: 'https://sts.windows.net/${tenant().tenantId}/'
+        }
+        validation: {
+          allowedAudiences: [
+            apiCallerIdentity.properties.clientId
+          ]
+          defaultAuthorizationPolicy: {
+            allowedApplications: [
+              apiCallerIdentity.properties.clientId
+            ]
+            allowedPrincipals: {
+              identities: [
+                apiCallerIdentity.properties.principalId
+              ]
+            }
+          }
+        }
+      }
+    }
+    login: {
+      tokenStore: {
+        enabled: false
+      }
+    }
+  }
+}
 resource hostStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, functionApp.id, 'host-storage'), scope: storage, properties: { roleDefinitionId: storageBlobDataOwnerRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' } }
 resource packageReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = { name: guid(storage.id, functionApp.id, 'package-reader'), scope: storage, properties: { roleDefinitionId: storageBlobDataReaderRole, principalId: functionApp.identity.principalId, principalType: 'ServicePrincipal' } }
 module workspaceRbac 'workspace-rbac.bicep' = { name: 'statNextWorkspaceRbac', scope: resourceGroup(sentinelSubscriptionId, sentinelResourceGroup), params: { workspaceName: sentinelWorkspaceName, functionPrincipalId: functionApp.identity.principalId } }
@@ -101,17 +152,21 @@ resource appSettings 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: functionApp
   name: 'appsettings'
   properties: union(
-    { FUNCTIONS_EXTENSION_VERSION: '~4', FUNCTIONS_WORKER_RUNTIME: 'python', APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString, AzureWebJobsStorage__accountName: storage.name, AzureWebJobsStorage__credential: 'managedidentity', AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob, AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue, AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table, WEBSITE_RUN_FROM_PACKAGE: privatePackageUri, WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned' },
+    { FUNCTIONS_EXTENSION_VERSION: '~4', FUNCTIONS_WORKER_RUNTIME: 'python', APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString, AzureWebJobsStorage__accountName: storage.name, AzureWebJobsStorage__credential: 'managedidentity', AzureWebJobsStorage__blobServiceUri: storage.properties.primaryEndpoints.blob, AzureWebJobsStorage__queueServiceUri: storage.properties.primaryEndpoints.queue, AzureWebJobsStorage__tableServiceUri: storage.properties.primaryEndpoints.table, WEBSITE_RUN_FROM_PACKAGE: privatePackageUri, WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: 'SystemAssigned', WEBSITE_AUTH_AAD_ALLOWED_TENANTS: tenant().tenantId },
     empty(defenderCloudAppsApiUrl) ? {} : { STAT_MCAS_PORTAL_URL: defenderCloudAppsApiUrl },
     empty(runPlaybookAllowedResourceIds) ? {} : { RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS: runPlaybookAllowedResourceIds }
   )
-  dependsOn: [hostStorageRole, packageReaderRole, workspaceRbac]
+  dependsOn: [hostStorageRole, packageReaderRole, workspaceRbac, authSettings]
 }
 resource ftpPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'ftp', properties: { allow: false } }
 resource scmPolicy 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2022-09-01' = { parent: functionApp, name: 'scm', properties: { allow: false } }
 resource workbook 'Microsoft.Insights/workbooks@2023-06-01' = { name: workbookName, location: location, kind: 'shared', properties: { displayName: 'Sentinel Triage AssistanT Next - Status', serializedData: loadTextContent('../workbook/stat-next.workbook.json'), version: '1.0', sourceId: insights.id, category: 'workbook', description: 'STAT Next operational workbook based on the original STAT Status workbook.' }, dependsOn: [functionApp, insights, workspaceRbac] }
 output functionName string = functionApp.name
 output functionPrincipalId string = functionApp.identity.principalId
+output apiCallerIdentityName string = apiCallerIdentity.name
+output apiCallerIdentityResourceId string = apiCallerIdentity.id
+output apiCallerIdentityClientId string = apiCallerIdentity.properties.clientId
+output apiCallerIdentityPrincipalId string = apiCallerIdentity.properties.principalId
 output storageAccountName string = storage.name
 output packageBlobUri string = privatePackageUri
 output packageDeploymentId string = packageDeploymentId
