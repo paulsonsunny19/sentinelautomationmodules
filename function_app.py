@@ -76,4 +76,4 @@ def stat_mcas(req):return execute(req,'stat_mcas',('base',),lambda b:query_mcas(
 @app.route(route='stat_scoring',methods=['POST'])
 def stat_scoring(req):return execute(req,'stat_scoring',('inputs',),lambda b:calculate(b['inputs']) if isinstance(b['inputs'],list) else (_ for _ in ()).throw(ValueError('inputs must be an array')))
 @app.route(route='stat_comment',methods=['POST'])
-def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas')))
+def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('ipBaseline'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas')))
