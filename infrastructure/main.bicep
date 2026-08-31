@@ -33,6 +33,7 @@ var packageContainerName = 'statnext-package'
 var packageBlobName = 'stat-next-${packageDeploymentId}.zip'
 var privatePackageUri = '${storage.properties.primaryEndpoints.blob}${packageContainerName}/${packageBlobName}'
 var stagingIdentityName = '${take(namePrefix, 40)}-stage'
+var statApiAudience = 'https://management.azure.com/'
 var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
 var storageBlobDataReaderRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
 var storageBlobDataContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions','ba92f5b4-2d11-453d-a403-e96b0029c9fe')
@@ -116,7 +117,7 @@ resource authSettings 'Microsoft.Web/sites/config@2022-09-01' = {
         }
         validation: {
           allowedAudiences: [
-            apiCallerIdentity.properties.clientId
+            statApiAudience
           ]
           defaultAuthorizationPolicy: {
             allowedApplications: [
@@ -167,6 +168,7 @@ output apiCallerIdentityName string = apiCallerIdentity.name
 output apiCallerIdentityResourceId string = apiCallerIdentity.id
 output apiCallerIdentityClientId string = apiCallerIdentity.properties.clientId
 output apiCallerIdentityPrincipalId string = apiCallerIdentity.properties.principalId
+output statApiAudience string = statApiAudience
 output storageAccountName string = storage.name
 output packageBlobUri string = privatePackageUri
 output packageDeploymentId string = packageDeploymentId
