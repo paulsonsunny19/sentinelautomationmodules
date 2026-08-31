@@ -52,7 +52,13 @@ jobs:
 
           core=json.load(open('/tmp/main.json'))
           resources=core.get('resources',[])
-          uami=[r for r in resources if r.get('type')=='Microsoft.ManagedIdentity/userAssignedIdentities' and 'api-caller' in json.dumps(r.get('name'))]
+          variables=core.get('variables',{})
+          assert 'apiCallerIdentityName' in variables, 'Core template must define the dedicated STAT API caller identity name'
+          uami=[
+              r for r in resources
+              if r.get('type')=='Microsoft.ManagedIdentity/userAssignedIdentities'
+              and r.get('name')=="[variables('apiCallerIdentityName')]"
+          ]
           assert len(uami)==1, 'Core template must create one dedicated STAT API caller identity'
 
           auth=next((r for r in resources if r.get('type')=='Microsoft.Web/sites/config' and 'authsettingsV2' in json.dumps(r.get('name'))),None)
