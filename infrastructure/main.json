@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15135963138729731486"
+      "templateHash": "12839570881829654120"
     }
   },
   "parameters": {
@@ -87,6 +87,7 @@
     "storageName": "[take(replace(toLower(parameters('namePrefix')), '-', ''), 24)]",
     "planName": "[format('{0}-plan', parameters('namePrefix'))]",
     "functionName": "[format('{0}-api', parameters('namePrefix'))]",
+    "apiCallerIdentityName": "[format('{0}-api-caller', take(parameters('namePrefix'), 45))]",
     "insightsName": "[format('{0}-appi', parameters('namePrefix'))]",
     "workbookName": "[guid(resourceGroup().id, parameters('namePrefix'), 'status-workbook')]",
     "packageContainerName": "statnext-package",
@@ -138,6 +139,12 @@
       "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
       "apiVersion": "2023-01-31",
       "name": "[variables('stagingIdentityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('apiCallerIdentityName')]",
       "location": "[parameters('location')]"
     },
     {
@@ -250,6 +257,57 @@
       ]
     },
     {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', variables('functionName'), 'authsettingsV2')]",
+      "properties": {
+        "platform": {
+          "enabled": true,
+          "runtimeVersion": "~1"
+        },
+        "globalValidation": {
+          "requireAuthentication": true,
+          "unauthenticatedClientAction": "Return401"
+        },
+        "httpSettings": {
+          "requireHttps": true
+        },
+        "identityProviders": {
+          "azureActiveDirectory": {
+            "enabled": true,
+            "registration": {
+              "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]",
+              "openIdIssuer": "[format('https://sts.windows.net/{0}/', tenant().tenantId)]"
+            },
+            "validation": {
+              "allowedAudiences": [
+                "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]"
+              ],
+              "defaultAuthorizationPolicy": {
+                "allowedApplications": [
+                  "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]"
+                ],
+                "allowedPrincipals": {
+                  "identities": [
+                    "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').principalId]"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "login": {
+          "tokenStore": {
+            "enabled": false
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName'))]",
+        "[resourceId('Microsoft.Web/sites', variables('functionName'))]"
+      ]
+    },
+    {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
@@ -283,8 +341,9 @@
       "type": "Microsoft.Web/sites/config",
       "apiVersion": "2022-09-01",
       "name": "[format('{0}/{1}', variables('functionName'), 'appsettings')]",
-      "properties": "[union(createObject('FUNCTIONS_EXTENSION_VERSION', '~4', 'FUNCTIONS_WORKER_RUNTIME', 'python', 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString, 'AzureWebJobsStorage__accountName', variables('storageName'), 'AzureWebJobsStorage__credential', 'managedidentity', 'AzureWebJobsStorage__blobServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, 'AzureWebJobsStorage__queueServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue, 'AzureWebJobsStorage__tableServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table, 'WEBSITE_RUN_FROM_PACKAGE', format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName')), 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID', 'SystemAssigned'), if(empty(parameters('defenderCloudAppsApiUrl')), createObject(), createObject('STAT_MCAS_PORTAL_URL', parameters('defenderCloudAppsApiUrl'))), if(empty(parameters('runPlaybookAllowedResourceIds')), createObject(), createObject('RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS', parameters('runPlaybookAllowedResourceIds'))))]",
+      "properties": "[union(createObject('FUNCTIONS_EXTENSION_VERSION', '~4', 'FUNCTIONS_WORKER_RUNTIME', 'python', 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString, 'AzureWebJobsStorage__accountName', variables('storageName'), 'AzureWebJobsStorage__credential', 'managedidentity', 'AzureWebJobsStorage__blobServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, 'AzureWebJobsStorage__queueServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.queue, 'AzureWebJobsStorage__tableServiceUri', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.table, 'WEBSITE_RUN_FROM_PACKAGE', format('{0}{1}/{2}', reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').primaryEndpoints.blob, variables('packageContainerName'), variables('packageBlobName')), 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID', 'SystemAssigned', 'WEBSITE_AUTH_AAD_ALLOWED_TENANTS', tenant().tenantId), if(empty(parameters('defenderCloudAppsApiUrl')), createObject(), createObject('STAT_MCAS_PORTAL_URL', parameters('defenderCloudAppsApiUrl'))), if(empty(parameters('runPlaybookAllowedResourceIds')), createObject(), createObject('RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS', parameters('runPlaybookAllowedResourceIds'))))]",
       "dependsOn": [
+        "[resourceId('Microsoft.Web/sites/config', variables('functionName'), 'authsettingsV2')]",
         "[resourceId('Microsoft.Web/sites', variables('functionName'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.Web/sites', variables('functionName')), 'host-storage'))]",
         "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
@@ -488,6 +547,22 @@
     "functionPrincipalId": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionName')), '2022-09-01', 'full').identity.principalId]"
+    },
+    "apiCallerIdentityName": {
+      "type": "string",
+      "value": "[variables('apiCallerIdentityName')]"
+    },
+    "apiCallerIdentityResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName'))]"
+    },
+    "apiCallerIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').clientId]"
+    },
+    "apiCallerIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('apiCallerIdentityName')), '2023-01-31').principalId]"
     },
     "storageAccountName": {
       "type": "string",
