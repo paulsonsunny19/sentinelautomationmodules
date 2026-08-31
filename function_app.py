@@ -98,4 +98,10 @@ def stat_run_playbook(req):return execute(req,'stat_run_playbook',('base','logic
 @app.route(route='stat_scoring',methods=['POST'])
 def stat_scoring(req):return execute(req,'stat_scoring',('inputs',),lambda b:calculate(b['inputs']) if isinstance(b['inputs'],list) else (_ for _ in ()).throw(ValueError('inputs must be an array')))
 @app.route(route='stat_comment',methods=['POST'])
-def stat_comment(req):return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(b['base'],b['scoring'],b.get('aad'),b.get('related'),b.get('ti'),b.get('ipEnrichment'),b.get('ipBaseline'),b.get('mde'),b.get('ueba'),b.get('file'),b.get('mcas'),b.get('oof')))
+def stat_comment(req):
+    return execute(req,'stat_comment',('base','scoring'),lambda b:build_comment(
+        b['base'], b['scoring'], aad=b.get('aad'), related=b.get('related'), ti=b.get('ti'),
+        ip_baseline=b.get('ipBaseline'), mde=b.get('mde'), ueba=b.get('ueba'),
+        file_insights=b.get('file'), mcas=b.get('mcas'), oof=b.get('oof'),
+        ip_enrichment=b.get('ipEnrichment')
+    ))
