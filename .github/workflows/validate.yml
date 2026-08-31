@@ -40,10 +40,20 @@ jobs:
         run: az bicep build --file infrastructure/main.bicep --outfile /tmp/main.json
       - name: Compile playbook bootstrap template
         run: az bicep build --file infrastructure/playbook-main.bicep --outfile /tmp/playbook-main.json
+      - name: Compile RunPlaybook RBAC module
+        run: az bicep build --file infrastructure/run-playbook-rbac.bicep --outfile /tmp/run-playbook-rbac.json
       - name: Validate generated ARM JSON
         run: |
           python -m json.tool /tmp/main.json >/dev/null
           python -m json.tool /tmp/playbook-main.json >/dev/null
+          python -m json.tool /tmp/run-playbook-rbac.json >/dev/null
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/run-playbook-rbac.json'))
+          text=json.dumps(d)
+          assert '51d6186e-6489-4900-b93f-92e23144cca5' in text
+          print('RunPlaybook RBAC is scoped to Microsoft Sentinel Playbook Operator')
+          PY
       - name: Validate native STAT activation ARM template
         run: |
           python -m json.tool infrastructure/playbook-activate.json >/dev/null
@@ -116,6 +126,7 @@ jobs:
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/ip_baseline.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/kql_safety.py'
           unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/oof.py'
+          unzip -Z1 artifacts/stat-next.zip | grep -qx 'modules/run_playbook.py'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/functions/'
           unzip -Z1 artifacts/stat-next.zip | grep -q '^.python_packages/lib/site-packages/azure/identity/'
           sha256sum artifacts/stat-next.zip
