@@ -12,6 +12,7 @@ def test_identity_enrichment_graph_roles_are_documented_in_grant_script():
         'IdentityRiskEvent.Read.All',
         'AuditLog.Read.All',
         'RoleManagement.Read.Directory',
+        'MailboxSettings.Read',
     ):
         assert f"Grant-AppRole $graphAppId '{role}'" in text
 
@@ -21,3 +22,4 @@ def test_graph_identity_roles_are_read_only():
     assert 'User.ReadWrite.All' not in text
     assert 'Directory.ReadWrite.All' not in text
     assert 'RoleManagement.ReadWrite.Directory' not in text
+    assert 'MailboxSettings.ReadWrite' not in text
