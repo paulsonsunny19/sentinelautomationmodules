@@ -23,6 +23,7 @@ param mediumScoreThreshold int = 30
 param highScoreThreshold int = 60
 param relatedAlertsLookbackDays int = 14
 param relatedAlertsKqlFilter string = ''
+param ipBaselineLookbackDays int = 30
 
 var functionName = '${namePrefix}-api'
 var playbookName = '${namePrefix}-incident-triage'
@@ -58,7 +59,7 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
     state: 'Enabled'
     definition: {
       '$schema': 'https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#'
-      contentVersion: '2.1.0.0'
+      contentVersion: '2.2.0.0'
       parameters: {
         '$connections': {
           type: 'Object'
@@ -70,7 +71,7 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
         }
         PlaybookVersion: {
           type: 'String'
-          defaultValue: '2.1.0-full'
+          defaultValue: '2.2.0-ip-baseline'
         }
       }
       triggers: {
@@ -193,6 +194,27 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
               workspaceId: sentinelWorkspaceId
               base: '@body(''Build_STAT_Base'')'
               lookbackDays: 14
+            }
+            authentication: {
+              type: 'ManagedServiceIdentity'
+              audience: environment().resourceManager
+            }
+          }
+        }
+        IP_Network_Baseline: {
+          type: 'Http'
+          runAfter: {
+            Build_STAT_Base: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            method: 'POST'
+            uri: '${functionBaseUri}/stat_ip_baseline'
+            body: {
+              workspaceId: sentinelWorkspaceId
+              base: '@body(''Build_STAT_Base'')'
+              lookbackDays: ipBaselineLookbackDays
             }
             authentication: {
               type: 'ManagedServiceIdentity'
@@ -376,6 +398,10 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
               'Succeeded'
               'Failed'
             ]
+            IP_Network_Baseline: [
+              'Succeeded'
+              'Failed'
+            ]
             MDE: [
               'Succeeded'
               'Failed'
@@ -416,6 +442,9 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
                   module: '@body(''Threat_Intelligence'')'
                 }
                 {
+                  module: '@body(''IP_Network_Baseline'')'
+                }
+                {
                   module: '@body(''MDE'')'
                 }
                 {
@@ -454,7 +483,7 @@ resource activatedPlaybook 'Microsoft.Logic/workflows@2019-05-01' = {
           inputs: {
             body: {
               incidentArmId: '@triggerBody()?[''object'']?[''id'']'
-              message: '@{concat(''STAT Next full triage completed. Score: '', string(body(''Score_STAT'')?[''TotalScore'']), ''. STAT severity: '', outputs(''Determine_STAT_Severity''), ''. Related alerts: '', string(body(''Related_Alerts'')?[''RelatedAlertsCount'']), ''; highest related severity: '', string(body(''Related_Alerts'')?[''HighestSeverityAlert'']), ''. TI matches: '', string(body(''Threat_Intelligence'')?[''MatchedTIItemCount'']), ''. UEBA anomalies: '', string(body(''UEBA'')?[''AnomalyCount'']), ''. File threats: '', string(body(''File_Insights'')?[''HashesLinkedToThreatCount'']), ''.'')}'
+              message: '@{concat(''STAT Next full triage completed. Score: '', string(body(''Score_STAT'')?[''TotalScore'']), ''. STAT severity: '', outputs(''Determine_STAT_Severity''), ''. Related alerts: '', string(body(''Related_Alerts'')?[''RelatedAlertsCount'']), ''; highest related severity: '', string(body(''Related_Alerts'')?[''HighestSeverityAlert'']), ''. TI matches: '', string(body(''Threat_Intelligence'')?[''MatchedTIItemCount'']), ''. IP isolated peers: '', string(body(''IP_Network_Baseline'')?[''IsolatedNewPeerCount'']), ''; established peers: '', string(body(''IP_Network_Baseline'')?[''EstablishedEstatePeerCount'']), ''. UEBA anomalies: '', string(body(''UEBA'')?[''AnomalyCount'']), ''. File threats: '', string(body(''File_Insights'')?[''HashesLinkedToThreatCount'']), ''.'')}'
             }
             host: {
               connection: {
