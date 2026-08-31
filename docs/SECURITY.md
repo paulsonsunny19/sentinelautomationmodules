@@ -46,6 +46,21 @@ These roles are not silently embedded as tenant-wide ARM grants. A tenant admini
 
 `stat_oof` reads `users/{id|userPrincipalName}/mailboxSettings/automaticRepliesSetting` with the least-privileged Microsoft Graph application role `MailboxSettings.Read`. It never writes mailbox settings or sends mail. The default native triage playbook does not invoke this module, so environments that do not require OOF context do not need to depend on this Graph permission at runtime.
 
+### Optional RunPlaybook orchestration
+
+`stat_run_playbook` is the only Function endpoint that intentionally initiates another workflow. It is therefore disabled by default and receives a separate security boundary rather than inheriting the enrichment-module model.
+
+- Empty `RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS` means disabled.
+- Allowed targets are exact Consumption Logic App resource IDs; there is no prefix or wildcard fallback.
+- The Function receives Microsoft Sentinel Playbook Operator only when the deployment enables RunPlaybook, and only on the configured playbook resource group.
+- The module uses Azure Resource Manager only to obtain the `manual` trigger callback URL. It does not request Logic App Contributor and does not use the broader `/triggers/.../run` ARM action.
+- The callback URL must be HTTPS on a recognized Azure Logic Apps callback host and must contain a signed query string.
+- The signed callback URL is never returned or written to logs.
+- Only the current normalized Sentinel `IncidentARMId` is posted to the target workflow.
+- Target playbooks are responsible for their own Sentinel connector permissions and response actions.
+
+This preserves upstream RunPlaybook compatibility without turning a caller-controlled Logic App resource ID into an unrestricted workflow-trigger primitive.
+
 ### Defender
 
 Defender for Endpoint and Defender for Cloud Apps permissions are independent read-only API profiles in the same administrator-reviewed permission script.
@@ -58,4 +73,4 @@ IP network prevalence uses `DeviceNetworkEvents`. An isolated peer can add a sma
 
 ## Principle
 
-Enabling one enrichment path must not silently grant unrelated write permissions. Attacker-shapeable or coverage-dependent enrichment must not reduce incident severity.
+Enabling one enrichment path must not silently grant unrelated write permissions. Privileged orchestration must be opt-in and exact-allow-listed. Attacker-shapeable or coverage-dependent enrichment must not reduce incident severity.
