@@ -35,9 +35,11 @@ The ARM/Bicep deployment creates Azure resource RBAC such as workspace Log Analy
 
 STAT Next currently contains optional Graph/Defender-backed enrichment modules. If those modules are required, a tenant administrator should review and run `infrastructure/grant-api-permissions.ps1` using the Function App managed-identity object ID. The script grants the read-only roles currently used by the code:
 
-- Microsoft Graph: `User.Read.All`, `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `AuditLog.Read.All`, `RoleManagement.Read.Directory`
+- Microsoft Graph: `User.Read.All`, `IdentityRiskyUser.Read.All`, `IdentityRiskEvent.Read.All`, `AuditLog.Read.All`, `RoleManagement.Read.Directory`, `MailboxSettings.Read`
 - WindowsDefenderATP: `AdvancedQuery.Read.All`, `Machine.Read.All`
 - Microsoft Defender for Cloud Apps: `Investigation.Read`
+
+`MailboxSettings.Read` is used only by the optional `stat_oof` automatic-replies enrichment endpoint. The native triage playbook does not invoke that endpoint by default.
 
 If a tenant API permission is not granted, STAT Next is designed to preserve the rest of the triage result and surface an enrichment warning where possible rather than hiding the missing integration.
 
