@@ -41,9 +41,9 @@ def _context(module,count_keys):
     if warnings:parts.append("Warnings: "+"; ".join(str(x) for x in warnings[:3]))
     return "; ".join(parts) if parts else "No additional findings"
 
-def build_comment(base,scoring,aad=None,related=None,ti=None,mde=None,ueba=None,file_insights=None,mcas=None):
-    aad,related,ti,mde,ueba,file_insights,mcas=[x if isinstance(x,dict) else {} for x in (aad,related,ti,mde,ueba,file_insights,mcas)]
-    score=scoring.get("TotalScore",0);degraded=bool(aad.get('RiskUserAvailable') is False or aad.get('RiskEventsAvailable') is False or related.get('EnrichmentWarnings') or ueba.get('EnrichmentWarnings'))
+def build_comment(base,scoring,aad=None,related=None,ti=None,ip_baseline=None,mde=None,ueba=None,file_insights=None,mcas=None):
+    aad,related,ti,ip_baseline,mde,ueba,file_insights,mcas=[x if isinstance(x,dict) else {} for x in (aad,related,ti,ip_baseline,mde,ueba,file_insights,mcas)]
+    score=scoring.get("TotalScore",0);degraded=bool(aad.get('RiskUserAvailable') is False or aad.get('RiskEventsAvailable') is False or related.get('EnrichmentWarnings') or ip_baseline.get('EnrichmentWarnings') or ueba.get('EnrichmentWarnings'))
     score_label=f"{score} (partial enrichment)" if degraded else score
     sections=[f"<h2>STAT Next Triage</h2><p><strong>Risk Score:</strong> {_html(score_label)}<br><strong>Entities Analyzed:</strong> {_html(base.get('EntitiesCount',0))}</p>"]
     details=[x for x in aad.get("DetailedResults",[]) if isinstance(x,dict)];risk_by_upn={str(x.get("UserPrincipalName","")).lower():x for x in details};risk_by_id={str(x.get("UserId","")).lower():x for x in details if x.get("UserId")};account_sections=[];accounts=base.get("Accounts",[])
@@ -56,6 +56,10 @@ def build_comment(base,scoring,aad=None,related=None,ti=None,mde=None,ueba=None,
     for item in base.get("IPs",[]):
         r=_raw(item);geo=item.get("GeoData") if isinstance(item.get("GeoData"),dict) else {};ip_rows.append([item.get("Address") or r.get("address"),geo.get("city"),geo.get("state"),geo.get("country"),geo.get("organization"),geo.get("organizationType"),geo.get("asn")])
     if ip_rows:sections.append("<h3>IP Info</h3>"+_html_table(["IP","City","State","Country","Organization","OrganizationType","ASN"],ip_rows))
+    baseline_rows=[]
+    for item in ip_baseline.get("DetailedResults",[]):
+        if isinstance(item,dict):baseline_rows.append([item.get("IPAddress"),item.get("BaselineState"),item.get("Connections"),item.get("Devices"),item.get("ActiveDays"),item.get("FirstSeen"),item.get("LastSeen"),item.get("Rationale")])
+    if baseline_rows:sections.append("<h3>IP Network Prevalence</h3>"+_html_table(["IP","State","Connections","Devices","Active Days","First Seen","Last Seen","Rationale"],baseline_rows))
     events=[x for x in aad.get("RiskEvents",[]) if isinstance(x,dict)]
     if events:
         rows=[[_mailto(e.get("UserPrincipalName")),e.get("RiskEventType"),e.get("RiskLevel"),e.get("RiskState"),e.get("RiskDetail"),e.get("Activity"),e.get("IPAddress"),e.get("DetectedDateTime")] for e in events[:20]];sections.append("<h3>Entra ID Protection - Risky Events</h3>"+_html_table(["User","Risk Event","Level","State","Detail","Activity","IP Address","Detected"],rows))
@@ -70,7 +74,7 @@ def build_comment(base,scoring,aad=None,related=None,ti=None,mde=None,ueba=None,
     files=[]
     for item in base.get("Files",[]):r=_raw(item);files.append([r.get("fileName") or r.get("FileName") or r.get("name") or item.get("Name"),r.get("directory") or r.get("Directory") or r.get("path") or r.get("Path") or item.get("Directory")])
     if files:sections.append("<h3>File Info</h3>"+_html_table(["File","Path"],files))
-    module_rows=[["AAD / Identity Risk",f"User risk: {aad.get('HighestRiskLevel','unknown')}; risk events: {aad.get('RiskEventCount',0) if aad.get('RiskEventsAvailable',True) else 'Unavailable'}; failed MFA: {aad.get('FailedMFATotalCount',0)}; fraud: {aad.get('MFAFraudTotalCount',0)}",_warnings(aad)],["Related Alerts",related.get("RelatedAlertsCount",0),_context(related,[("RelatedAlertsCount","Related alerts")])],["Threat Intelligence",ti.get("MatchedTIItemCount",0),_context(ti,[("MatchedTIItemCount","TI matches")])],["MDE",mde.get("AnalyzedEntities",mde.get("MachineCount",0)),_context(mde,[("AnalyzedEntities","Entities"),("MachineCount","Machines")])],["UEBA",ueba.get("AnomalyCount",0),_context(ueba,[("AnomalyCount","Anomalies")])],["File Insights",file_insights.get("HashesLinkedToThreatCount",0),_context(file_insights,[("HashesLinkedToThreatCount","Threat-linked hashes")])]]
+    module_rows=[["AAD / Identity Risk",f"User risk: {aad.get('HighestRiskLevel','unknown')}; risk events: {aad.get('RiskEventCount',0) if aad.get('RiskEventsAvailable',True) else 'Unavailable'}; failed MFA: {aad.get('FailedMFATotalCount',0)}; fraud: {aad.get('MFAFraudTotalCount',0)}",_warnings(aad)],["Related Alerts",related.get("RelatedAlertsCount",0),_context(related,[("RelatedAlertsCount","Related alerts")])],["Threat Intelligence",ti.get("MatchedTIItemCount",0),_context(ti,[("MatchedTIItemCount","TI matches")])],["IP Network Baseline",ip_baseline.get("IPsObservedCount",0),_context(ip_baseline,[("IPsAnalyzedCount","IPs analyzed"),("IPsObservedCount","IPs observed"),("IsolatedNewPeerCount","Isolated peers"),("EstablishedEstatePeerCount","Established peers")])],["MDE",mde.get("AnalyzedEntities",mde.get("MachineCount",0)),_context(mde,[("AnalyzedEntities","Entities"),("MachineCount","Machines")])],["UEBA",ueba.get("AnomalyCount",0),_context(ueba,[("AnomalyCount","Anomalies")])],["File Insights",file_insights.get("HashesLinkedToThreatCount",0),_context(file_insights,[("HashesLinkedToThreatCount","Threat-linked hashes")])]]
     if mcas and not mcas.get('ConfigurationRequired'):module_rows.append(["Defender for Cloud Apps",mcas.get("AnalyzedEntities",mcas.get("MatchedCount",0)),_context(mcas,[("AnalyzedEntities","Entities"),("MatchedCount","Matches")])])
     elif mcas.get('ConfigurationRequired'):module_rows.append(["Defender for Cloud Apps","Disabled / not configured",mcas.get('ConfigurationMessage')])
     sections.append("<h3>Enrichment Summary</h3>"+_html_table(["Module","Result","Context"],module_rows));sections.append("<p><em>Generated by STAT Next using the Microsoft Sentinel incident payload and configured enrichment modules.</em></p>")
