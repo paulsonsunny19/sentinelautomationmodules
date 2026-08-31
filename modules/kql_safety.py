@@ -62,6 +62,12 @@ def assert_no_dangerous_constructs(
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,99}$")
 _BRACKETED_KEY = re.compile(r"^\['[^'\]\\]{1,100}'\]$")
+_LOGIC_APP_RESOURCE_ID = re.compile(
+    r"^/subscriptions/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"/resourceGroups/[A-Za-z0-9._()\-]{1,90}"
+    r"/providers/Microsoft\.Logic/workflows/[A-Za-z0-9._()\-]{1,80}$",
+    flags=re.IGNORECASE,
+)
 
 
 def assert_safe_watchlist_alias(value: str) -> None:
@@ -76,3 +82,26 @@ def assert_safe_watchlist_key(value: str) -> None:
         raise ValueError(
             "watchlistKey must be a simple column name or a bracketed ['Key Name'] column reference"
         )
+
+
+def assert_allowed_logic_app_resource_id(resource_id: str, allowed_resource_ids: Iterable[str]) -> None:
+    """Require a well-formed Consumption Logic App resource ID and exact allow-list membership.
+
+    The RunPlaybook endpoint is intentionally default-deny: an empty allow-list
+    means the privileged capability is disabled. Exact resource IDs are used
+    instead of prefix matching so a similarly named workflow or resource group
+    cannot inherit authorization accidentally.
+    """
+    candidate = str(resource_id or '').strip().rstrip('/')
+    if not _LOGIC_APP_RESOURCE_ID.fullmatch(candidate):
+        raise ValueError('logicAppResourceId is not a well-formed Consumption Logic App resource ID')
+
+    allowed = {
+        str(item or '').strip().rstrip('/').lower()
+        for item in allowed_resource_ids
+        if str(item or '').strip()
+    }
+    if not allowed:
+        raise ValueError('RunPlaybook is disabled until RUN_PLAYBOOK_ALLOWED_RESOURCE_IDS is configured')
+    if candidate.lower() not in allowed:
+        raise ValueError('logicAppResourceId is not in the exact RunPlaybook allow-list')
